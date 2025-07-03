@@ -1,38 +1,40 @@
-#![allow(unused_imports)]
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-use std::io::{Read, Write};
-use std::net::TcpListener;
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
                 println!("accepted new connection");
-
-                loop {
-                    let mut buf = [0; 512];
-                    match stream.read(&mut buf) {
-                        Ok(0) => {
-                            println!("Connection closed by client");
-                            break;
-                        }
-                        Ok(bytes_read) => {
-                            let command = String::from_utf8_lossy(&buf[..bytes_read]);
-                            println!("Bytes read: {}", bytes_read);
-                            println!("Command: {:?}", command);
-                            stream.write_all(b"+PONG\r\n").unwrap();
-                        }
-                        Err(e) => {
-                            println!("Failed to read from connection: {}", e);
-                            break;
-                        }
-                    }
-                }
+                tokio::spawn(handle_connection(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
+            }
+        }
+    }
+}
+
+async fn handle_connection(mut stream: TcpStream) {
+    loop {
+        let mut buf = bytes::BytesMut::with_capacity(512);
+        match stream.read_buf(&mut buf).await {
+            Ok(0) => {
+                println!("Connection closed by client");
+                break;
+            }
+            Ok(bytes_read) => {
+                let command = String::from_utf8_lossy(&buf[..bytes_read]);
+                println!("Bytes read: {}", bytes_read);
+                println!("Command: {:?}", command);
+                stream.write_all(b"+PONG\r\n").await.unwrap();
+            }
+            Err(e) => {
+                println!("Failed to read from connection: {}", e);
+                break;
             }
         }
     }
