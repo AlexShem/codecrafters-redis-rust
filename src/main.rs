@@ -1,7 +1,9 @@
 mod server;
+mod resp;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener};
-use crate::server::{Command, Server};
+use crate::server::{Server};
 
 #[tokio::main]
 async fn main() {
@@ -33,20 +35,16 @@ async fn handle_connection(mut server: Server) {
                 let command_raw = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
                 println!("Bytes read: {}", bytes_read);
                 println!("Command: {:?}", command_raw);
-                let command = server.parse_resp_array(command_raw);
-
-                match command {
-                    Ok(Command::Ping) => {
-                        server.writer.write_all(b"+PONG\r\n").await.unwrap();
-                        server.writer.flush().await.unwrap();
-                    },
-                    Ok(Command::Echo(msg)) => {
-                        let response = format!("${}\r\n{}\r\n", msg.len(), msg);
-                        println!("Created response: {response}");
+                
+                match server.parse_command(command_raw) {
+                    Ok(command) => {
+                        let response = server.execute_command(command);
+                        println!("Response: {:?}", response);
                         server.writer.write_all(response.as_bytes()).await.unwrap();
                         server.writer.flush().await.unwrap();
-                    }
-                    Err(_) => {
+                    },
+                    Err(e) => {
+                        println!("Parse error: {}", e);
                         server.writer.write_all(b"-ERR unknown command\r\n").await.unwrap();
                         server.writer.flush().await.unwrap();
                     }
