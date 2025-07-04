@@ -3,6 +3,7 @@ use crate::resp::RespValue;
 use anyhow::anyhow;
 use resp::RespParser;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -11,7 +12,7 @@ use tokio::net::TcpStream;
 pub enum Command {
     Ping,
     Echo(String),
-    Set { key: String, value: String },
+    Set { key: String, value: String, expiry_ms: Option<u128> },
     Get { key: String },
 }
 
@@ -19,6 +20,7 @@ pub struct Server {
     pub reader: BufReader<OwnedReadHalf>,
     pub writer: BufWriter<OwnedWriteHalf>,
     pub storage: HashMap<String, String>,
+    pub expiry_times: HashMap<String, u128>,
 }
 
 impl Server {
@@ -30,6 +32,22 @@ impl Server {
             reader,
             writer,
             storage: HashMap::new(),
+            expiry_times: HashMap::new(),
+        }
+    }
+
+    fn current_time_ms() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    }
+
+    fn is_expired(&self, key: &str) -> bool {
+        if let Some(&expiry_time) = self.expiry_times.get(key) {
+            Self::current_time_ms() >= expiry_time
+        } else {
+            false
         }
     }
 
@@ -59,8 +77,8 @@ impl Server {
                         }
                     }
                     "SET" => {
-                        if elements.len() != 3 {
-                            return Err(anyhow!("SET requires exactly 2 arguments"));
+                        if elements.len() < 3 {
+                            return Err(anyhow!("SET requires at least 2 arguments"));
                         }
                         let key = match &elements[1] {
                             RespValue::BulkString(Some(k)) => k.clone(),
@@ -72,7 +90,22 @@ impl Server {
                             _ => return Err(anyhow!("SET value must be a string")),
                         };
 
-                        Ok(Command::Set { key, value })
+                        let mut expiry_ms = None;
+
+                        if elements.len() >= 5 {
+                            if let RespValue::BulkString(Some(px_arg)) = &elements[3] {
+                                if px_arg.to_uppercase() == "PX" {
+                                    if let RespValue::BulkString(Some(expiry_str)) = &elements[4] {
+                                        expiry_ms = Some(
+                                            expiry_str.parse::<u128>()
+                                            .map_err(|_| anyhow!("Invalid expiry time: {}", expiry_str))?
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        Ok(Command::Set { key, value, expiry_ms })
                     }
                     "GET" => {
                         if elements.len() != 2 {
@@ -97,14 +130,26 @@ impl Server {
         match command {
             Command::Ping => "+PONG\r\n".to_string(),
             Command::Echo(msg) => format!("${}\r\n{}\r\n", msg.len(), msg),
-            Command::Set { key, value } => {
-                self.storage.insert(key, value);
+            Command::Set { key, value, expiry_ms } => {
+                self.storage.insert(key.clone(), value);
+                if let Some(expiry_ms) = expiry_ms {
+                    let expiry_time = Self::current_time_ms() + expiry_ms;
+                    self.expiry_times.insert(key, expiry_time);
+                }
                 "+OK\r\n".to_string()
             }
-            Command::Get { key } => match self.storage.get(&key) {
-                None => "-1\r\n".to_string(),
-                Some(value) => format!("${}\r\n{}\r\n", value.len(), value),
-            },
+            Command::Get { key } => {
+                if self.storage.contains_key(&key) && !self.is_expired(&key) {
+                    let value = self.storage.get(&key).unwrap();
+                    format!("${}\r\n{}\r\n", value.len(), value)
+                } else {
+                    if self.is_expired(&key) {
+                        self.storage.remove(&key);
+                        self.expiry_times.remove(&key);
+                    }
+                    "$-1\r\n".to_string()
+                }
+            }
         }
     }
 }
