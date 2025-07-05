@@ -75,23 +75,20 @@ fn parse_args() -> ServerConfig {
             }
             "--replicaof" => {
                 if i + 1 < args.len() {
-                    let replicaof_str = &args[i + 1];
-                    let parts: Vec<&str> = replicaof_str.split_whitespace().collect();
+                    match args[i + 1].split_once(' ') {
+                        None => {
+                            eprintln!("Error: --replicaof requires '<MASTER_HOST> <MASTER_PORT>' format");
+                            std::process::exit(1);
+                        }
+                        Some((host, port)) => {
+                            if port.parse::<u16>().is_err() {
+                                eprintln!("Error: MASTER_PORT must be a valid number");
+                                std::process::exit(1);
+                            }
 
-                    if parts.len() != 2 {
-                        eprintln!("Error: --replicaof requires '<MASTER_HOST> <MASTER_PORT>' format");
-                        std::process::exit(1);
+                            replicaof = Some((host.to_string(), port.to_string()))
+                        }
                     }
-
-                    let host = parts[0].to_string();
-                    let port = parts[1];
-
-                    if port.parse::<u16>().is_err() {
-                        eprintln!("Error: MASTER_PORT must be a valid number");
-                        std::process::exit(1);
-                    }
-
-                    replicaof = Some((host, port.to_string()));
 
                     i += 2;
                 } else {
