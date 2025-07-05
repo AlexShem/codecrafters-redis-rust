@@ -1,6 +1,7 @@
 use crate::rdb::RdbParser;
 use crate::resp;
 use crate::resp::RespValue;
+use crate::server::InfoCommand::Replication;
 use anyhow::anyhow;
 use resp::RespParser;
 use std::collections::HashMap;
@@ -27,12 +28,21 @@ pub enum Command {
     Keys {
         pattern: String,
     },
+    Info {
+        subcommand: Option<InfoCommand>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum ConfigCommand {
     Get { parameter: String },
     // Future: Set {parameter, value}
+}
+
+#[derive(Debug, Clone)]
+pub enum InfoCommand {
+    Replication,
+    // Future: Server, Client, Memory, etc
 }
 
 pub struct Server {
@@ -202,6 +212,26 @@ impl Server {
                             _ => Err(anyhow::anyhow!("KEYS pattern must be a string")),
                         }
                     }
+                    "INFO" => {
+                        let mut subcommand = None;
+
+                        if elements.len() == 2 {
+                            subcommand = match &elements[1] {
+                                RespValue::BulkString(Some(cmd)) => Some(cmd.to_uppercase()),
+                                _ => return Err(anyhow!("Invalid INFO subcommand")),
+                            }
+                        }
+
+                        if let Some(cmd) = subcommand {
+                            return match cmd.as_str() {
+                                "REPLICATION" => Ok(Command::Info {
+                                    subcommand: Some(Replication),
+                                }),
+                                _ => Err(anyhow::anyhow!("Unsupported INFO command: {}", cmd)),
+                            };
+                        }
+                        Ok(Command::Info { subcommand: None })
+                    }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
             }
@@ -276,6 +306,17 @@ impl Server {
                 } else {
                     // For now, only support "*" pattern
                     "-ERR pattern not supported\r\n".to_string()
+                }
+            }
+            Command::Info { subcommand } => {
+                if let Some(info_command) = subcommand {
+                    match info_command {
+                        Replication => "$11\r\nrole:master\r\n".to_string(),
+                    }
+                } else {
+                    // Print the entire info
+                    // role:master for now
+                    "$11\r\nrole:master\r\n".to_string()
                 }
             }
         }
