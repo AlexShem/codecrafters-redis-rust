@@ -3,23 +3,66 @@ mod resp;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener};
-use crate::server::{Server};
+use crate::server::{Server, ServerConfig};
 
 #[tokio::main]
 async fn main() {
+    let config = parse_args();
+
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
                 println!("accepted new connection");
-                let server = Server::new(stream);
+                let server = Server::new(stream, config.clone());
                 tokio::spawn(async move { handle_connection(server).await });
             }
             Err(e) => {
                 println!("error: {}", e);
             }
         }
+    }
+}
+
+fn parse_args() -> ServerConfig {
+    let args: Vec<String> = std::env::args().collect();
+
+    let mut dir = String::new();
+    let mut dbfilename = String::new();
+
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dir" => {
+                if i + 1 < args.len() {
+                    dir = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    eprintln!("Error: --dir requires a value");
+                    std::process::exit(1);
+                }
+            }
+            "--dbfilename" => {
+                if i + 1 < args.len() {
+                    dbfilename = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    eprintln!("Error: --dbfilename requires a value");
+                    std::process::exit(1);
+                }
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", args[i]);
+                i += 1;
+            }
+        }
+    }
+
+    ServerConfig {
+        dir,
+        dbfilename,
     }
 }
 

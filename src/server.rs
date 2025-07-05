@@ -12,8 +12,23 @@ use tokio::net::TcpStream;
 pub enum Command {
     Ping,
     Echo(String),
-    Set { key: String, value: String, expiry_ms: Option<u128> },
-    Get { key: String },
+    Set {
+        key: String,
+        value: String,
+        expiry_ms: Option<u128>,
+    },
+    Get {
+        key: String,
+    },
+    Config {
+        subcommand: ConfigCommand,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ConfigCommand {
+    Get { parameter: String },
+    // Future: Set {parameter, value}
 }
 
 pub struct Server {
@@ -21,10 +36,17 @@ pub struct Server {
     pub writer: BufWriter<OwnedWriteHalf>,
     pub storage: HashMap<String, String>,
     pub expiry_times: HashMap<String, u128>,
+    pub config: ServerConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    pub dir: String,
+    pub dbfilename: String,
 }
 
 impl Server {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream, config: ServerConfig) -> Self {
         let (read, write) = stream.into_split();
         let reader = BufReader::new(read);
         let writer = BufWriter::new(write);
@@ -33,6 +55,7 @@ impl Server {
             writer,
             storage: HashMap::new(),
             expiry_times: HashMap::new(),
+            config,
         }
     }
 
@@ -96,16 +119,20 @@ impl Server {
                             if let RespValue::BulkString(Some(px_arg)) = &elements[3] {
                                 if px_arg.to_uppercase() == "PX" {
                                     if let RespValue::BulkString(Some(expiry_str)) = &elements[4] {
-                                        expiry_ms = Some(
-                                            expiry_str.parse::<u128>()
-                                            .map_err(|_| anyhow!("Invalid expiry time: {}", expiry_str))?
-                                        );
+                                        expiry_ms =
+                                            Some(expiry_str.parse::<u128>().map_err(|_| {
+                                                anyhow!("Invalid expiry time: {}", expiry_str)
+                                            })?);
                                     }
                                 }
                             }
                         }
 
-                        Ok(Command::Set { key, value, expiry_ms })
+                        Ok(Command::Set {
+                            key,
+                            value,
+                            expiry_ms,
+                        })
                     }
                     "GET" => {
                         if elements.len() != 2 {
@@ -119,6 +146,35 @@ impl Server {
                             _ => Err(anyhow::anyhow!("GET key must be a string")),
                         }
                     }
+                    "CONFIG" => {
+                        if elements.len() < 2 {
+                            return Err(anyhow!("CONFIG requires a subcommand"));
+                        }
+
+                        let subcommand = match &elements[1] {
+                            RespValue::BulkString(Some(cmd)) => cmd.to_uppercase(),
+                            _ => return Err(anyhow!("Invalid CONFIG subcommand")),
+                        };
+
+                        match subcommand.as_str() {
+                            "GET" => {
+                                if elements.len() != 3 {
+                                    return Err(anyhow!(
+                                        "CONFIG GET requires exactly one parameter"
+                                    ));
+                                }
+                                match &elements[2] {
+                                    RespValue::BulkString(Some(parameter)) => Ok(Command::Config {
+                                        subcommand: ConfigCommand::Get {
+                                            parameter: parameter.clone(),
+                                        },
+                                    }),
+                                    _ => Err(anyhow!("CONFIG GET parameter must be a string")),
+                                }
+                            }
+                            _ => Err(anyhow!("Unknown CONFIG subcomand: {}", subcommand)),
+                        }
+                    }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
             }
@@ -130,7 +186,11 @@ impl Server {
         match command {
             Command::Ping => "+PONG\r\n".to_string(),
             Command::Echo(msg) => format!("${}\r\n{}\r\n", msg.len(), msg),
-            Command::Set { key, value, expiry_ms } => {
+            Command::Set {
+                key,
+                value,
+                expiry_ms,
+            } => {
                 self.storage.insert(key.clone(), value);
                 if let Some(expiry_ms) = expiry_ms {
                     let expiry_time = Self::current_time_ms() + expiry_ms;
@@ -150,6 +210,44 @@ impl Server {
                     "$-1\r\n".to_string()
                 }
             }
+            Command::Config { subcommand } => {
+                match subcommand {
+                    ConfigCommand::Get { parameter } => {
+                        match parameter.as_str() {
+                            "dir" => {
+                                let elements = vec!["dir".to_string(), self.config.dir.clone()];
+                                format_resp_array(&elements)
+                                // format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir_name.len(), dir_name)
+                            }
+                            "dbfilename" => {
+                                let elements =
+                                    vec!["dbfilename".to_string(), self.config.dbfilename.clone()];
+                                format_resp_array(&elements)
+                                // format!("*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n", filename.len(), filename)
+                            }
+                            _ => format!("$-ERR unknown parameter: {}\r\n", parameter),
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            dir: String::new(),
+            dbfilename: String::new(),
+        }
+    }
+}
+
+fn format_resp_array(elements: &[String]) -> String {
+    let mut result = format!("*{}\r\n", elements.len());
+
+    for element in elements {
+        result.push_str(&format!("${}\r\n{}\r\n", element.len(), element))
+    }
+    result
 }
