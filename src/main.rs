@@ -7,10 +7,14 @@ use tokio::net::{TcpListener};
 use crate::server::{Server, ServerConfig};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let config = parse_args();
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let port = &config.port;
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&addr).await?;
+
+    println!("Server listening on {}", addr);
 
     loop {
         match listener.accept().await {
@@ -31,6 +35,7 @@ fn parse_args() -> ServerConfig {
 
     let mut dir = String::new();
     let mut dbfilename = String::new();
+    let mut port = 6379u16;
 
     let mut i = 1;
 
@@ -54,6 +59,18 @@ fn parse_args() -> ServerConfig {
                     std::process::exit(1);
                 }
             }
+            "--port" => {
+                if i + 1 < args.len() {
+                    port = args[i + 1].parse()
+                        .unwrap_or_else(|_| {
+                            eprintln!("Error: --port must be a valid number");
+                            std::process::exit(1);
+                        });
+                    i += 2;
+                } else {
+                    eprintln!("Error: --port requires a value");
+                    std::process::exit(1);                }
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 i += 1;
@@ -64,6 +81,7 @@ fn parse_args() -> ServerConfig {
     ServerConfig {
         dir,
         dbfilename,
+        port: port.to_string()
     }
 }
 

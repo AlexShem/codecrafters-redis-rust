@@ -47,6 +47,7 @@ pub struct Server {
 pub struct ServerConfig {
     pub dir: String,
     pub dbfilename: String,
+    pub port: String,
 }
 
 impl Server {
