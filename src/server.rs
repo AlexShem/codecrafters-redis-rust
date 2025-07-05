@@ -1,3 +1,4 @@
+use crate::rdb::RdbParser;
 use crate::resp;
 use crate::resp::RespValue;
 use anyhow::anyhow;
@@ -22,6 +23,9 @@ pub enum Command {
     },
     Config {
         subcommand: ConfigCommand,
+    },
+    Keys {
+        pattern: String,
     },
 }
 
@@ -50,11 +54,21 @@ impl Server {
         let (read, write) = stream.into_split();
         let reader = BufReader::new(read);
         let writer = BufWriter::new(write);
+
+        // Load RDB data if file exists
+        let mut storage = HashMap::new();
+        let mut expiry_times = HashMap::new();
+
+        if let Ok(rdb_data) = RdbParser::parse_file(&config.dir, &config.dbfilename) {
+            storage = rdb_data.keys;
+            expiry_times = rdb_data.expiry_times;
+        }
+
         Server {
             reader,
             writer,
-            storage: HashMap::new(),
-            expiry_times: HashMap::new(),
+            storage,
+            expiry_times,
             config,
         }
     }
@@ -175,6 +189,18 @@ impl Server {
                             _ => Err(anyhow!("Unknown CONFIG subcomand: {}", subcommand)),
                         }
                     }
+                    "KEYS" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("KEYS requires exactly 1 arguments"));
+                        }
+
+                        match &elements[1] {
+                            RespValue::BulkString(Some(pattern)) => Ok(Command::Keys {
+                                pattern: pattern.clone(),
+                            }),
+                            _ => Err(anyhow::anyhow!("KEYS pattern must be a string")),
+                        }
+                    }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
             }
@@ -210,35 +236,47 @@ impl Server {
                     "$-1\r\n".to_string()
                 }
             }
-            Command::Config { subcommand } => {
-                match subcommand {
-                    ConfigCommand::Get { parameter } => {
-                        match parameter.as_str() {
-                            "dir" => {
-                                let elements = vec!["dir".to_string(), self.config.dir.clone()];
-                                format_resp_array(&elements)
-                                // format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir_name.len(), dir_name)
-                            }
-                            "dbfilename" => {
-                                let elements =
-                                    vec!["dbfilename".to_string(), self.config.dbfilename.clone()];
-                                format_resp_array(&elements)
-                                // format!("*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n", filename.len(), filename)
-                            }
-                            _ => format!("$-ERR unknown parameter: {}\r\n", parameter),
+            Command::Config { subcommand } => match subcommand {
+                ConfigCommand::Get { parameter } => match parameter.as_str() {
+                    "dir" => {
+                        let elements = vec!["dir".to_string(), self.config.dir.clone()];
+                        format_resp_array(&elements)
+                    }
+                    "dbfilename" => {
+                        let elements =
+                            vec!["dbfilename".to_string(), self.config.dbfilename.clone()];
+                        format_resp_array(&elements)
+                    }
+                    _ => format!("$-ERR unknown parameter: {}\r\n", parameter),
+                },
+            },
+            Command::Keys { pattern } => {
+                if pattern == "*" {
+                    // Get all non-expired keys
+                    let mut keys: Vec<String> = self
+                        .storage
+                        .keys()
+                        .filter(|&key| !self.is_expired(key))
+                        .cloned()
+                        .collect();
+
+                    // Clean up expired keys
+                    for key in &keys {
+                        if self.is_expired(key) {
+                            self.storage.remove(key);
+                            self.expiry_times.remove(key);
                         }
                     }
+
+                    // Filter out expired keys
+                    keys.retain(|key| !self.is_expired(key));
+
+                    format_resp_array(&keys)
+                } else {
+                    // For now, only support "*" pattern
+                    "-ERR pattern not supported\r\n".to_string()
                 }
             }
-        }
-    }
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            dir: String::new(),
-            dbfilename: String::new(),
         }
     }
 }
