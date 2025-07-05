@@ -15,35 +15,24 @@ impl RdbParser {
     pub fn parse_file(dir: &str, filename: &str) -> Result<RdbFile> {
         let path = Path::new(dir).join(filename);
 
-        println!("Looking for RDB file at: {:?}", path);
-
         if !path.exists() {
-            println!("RDB file not found, starting with empty database");
             return Ok(RdbFile {
                 keys: HashMap::new(),
                 expiry_times: HashMap::new(),
             });
         }
 
-        println!("RDB file found, parsing...");
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
 
         // Parse header
         Self::parse_header(&mut reader)?;
-        println!("Header parsed successfully");
 
         // Skip metadata section
         Self::skip_metadata(&mut reader)?;
-        println!("Metadata section processed");
 
         // Parse database section
         let result = Self::parse_database(&mut reader)?;
-        println!("Parsed {} keys from RDB file", result.keys.len());
-
-        for (key, value) in &result.keys {
-            println!("Key: '{}', Value: '{}'", key, value);
-        }
 
         Ok(result)
     }
@@ -148,33 +137,26 @@ impl RdbParser {
     }
 
     fn skip_metadata(reader: &mut BufReader<File>) -> Result<()> {
-        println!("Starting metadata parsing...");
         loop {
             let mut buf = [0u8; 1];
             reader.read_exact(&mut buf)?;
-            println!("Read byte: 0x{:02X}", buf[0]);
 
             match buf[0] {
                 0xFA => {
-                    println!("Found metadata section");
                     // Metadata section - skip name and value
-                    let name = Self::parse_string_encoded(reader)?;
-                    let value = Self::parse_string_encoded(reader)?;
-                    println!("Metadata: {} = {}", name, value);
+                    let _metadata_name = Self::parse_string_encoded(reader)?;
+                    let _metadata_value = Self::parse_string_encoded(reader)?;
                 }
                 0xFE => {
-                    println!("Found database section marker");
                     // Database section starts - we need to "put back" this byte
                     // Since we can't easily seek back, we'll handle this differently
                     return Ok(());
                 }
                 0xFF => {
-                    println!("Found end of file marker");
                     // End of file
                     return Ok(());
                 }
                 _ => {
-                    println!("Unknown byte 0x{:02X}, assuming database section", buf[0]);
                     // Unknown byte, assume database section
                     return Ok(());
                 }
@@ -183,35 +165,28 @@ impl RdbParser {
     }
 
     fn parse_database(reader: &mut BufReader<File>) -> Result<RdbFile> {
-        println!("Starting database parsing...");
         let mut keys = HashMap::new();
         let mut expiry_times = HashMap::new();
 
         // The 0xFE marker was already consumed by skip_metadata
         // Read database index directly
-        let db_index = Self::parse_size_encoded(reader)?;
-        println!("Database index: {}", db_index);
+        let _db_index = Self::parse_size_encoded(reader)?;
 
         // Check for hash table size info
         let mut buf = [0u8; 1];
         reader.read_exact(&mut buf)?;
         if buf[0] == 0xFB {
-            println!("Hash table size info found");
-            let hash_table_size = Self::parse_size_encoded(reader)?;
-            let expires_size = Self::parse_size_encoded(reader)?;
-            println!("Hash table size: {}, Expires size: {}", hash_table_size, expires_size);
+            let _hash_table_size = Self::parse_size_encoded(reader)?;
+            let _expires_size = Self::parse_size_encoded(reader)?;
         } else {
-            println!("No hash table size info, processing as key-value. Byte: 0x{:02X}", buf[0]);
             // This byte might be the start of a key-value pair
             // Put it back by processing it as a marker
             let marker = buf[0];
 
             match marker {
                 0x00 => {
-                    println!("String value type, no expiry");
                     let key = Self::parse_string_encoded(reader)?;
                     let value = Self::parse_string_encoded(reader)?;
-                    println!("Found key: '{}', value: '{}'", key, value);
                     keys.insert(key, value);
                 }
                 _ => {
@@ -225,15 +200,12 @@ impl RdbParser {
             match reader.read_exact(&mut buf) {
                 Ok(()) => {
                     let marker = buf[0];
-                    println!("Processing marker: 0x{:02X}", marker);
 
                     match marker {
                         0xFF => {
-                            println!("End of file marker found");
                             break;
                         }
                         0xFD => {
-                            println!("Expire in seconds marker");
                             let mut expiry_buf = [0u8; 4];
                             reader.read_exact(&mut expiry_buf)?;
                             let expiry_s = u32::from_le_bytes(expiry_buf) as u128;
@@ -244,13 +216,11 @@ impl RdbParser {
 
                             let key = Self::parse_string_encoded(reader)?;
                             let value = Self::parse_string_encoded(reader)?;
-                            println!("Found key with expiry: '{}', value: '{}', expires in {}ms", key, value, expiry_ms);
 
                             keys.insert(key.clone(), value);
                             expiry_times.insert(key, expiry_ms);
                         }
                         0xFC => {
-                            println!("Expire in milliseconds marker");
                             let mut expiry_buf = [0u8; 8];
                             reader.read_exact(&mut expiry_buf)?;
                             let expiry_ms = u64::from_le_bytes(expiry_buf) as u128;
@@ -260,16 +230,13 @@ impl RdbParser {
 
                             let key = Self::parse_string_encoded(reader)?;
                             let value = Self::parse_string_encoded(reader)?;
-                            println!("Found key with expiry: '{}', value: '{}', expires in {}ms", key, value, expiry_ms);
 
                             keys.insert(key.clone(), value);
                             expiry_times.insert(key, expiry_ms);
                         }
                         0x00 => {
-                            println!("String value type, no expiry");
                             let key = Self::parse_string_encoded(reader)?;
                             let value = Self::parse_string_encoded(reader)?;
-                            println!("Found key: '{}', value: '{}'", key, value);
 
                             keys.insert(key, value);
                         }
@@ -285,7 +252,6 @@ impl RdbParser {
             }
         }
 
-        println!("Database parsing complete. Found {} keys", keys.len());
         Ok(RdbFile { keys, expiry_times })
     }
 }

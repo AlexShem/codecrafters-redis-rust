@@ -77,8 +77,6 @@ async fn handle_connection(mut server: Server) {
             }
             Ok(bytes_read) => {
                 let command_raw = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
-                println!("Bytes read: {}", bytes_read);
-                println!("Command: {:?}", command_raw);
                 
                 match server.parse_command(command_raw) {
                     Ok(command) => {
