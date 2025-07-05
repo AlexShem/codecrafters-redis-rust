@@ -4,11 +4,13 @@ mod rdb;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener};
-use crate::server::{Server, ServerConfig};
+use crate::server::{ReplicationState, Server, ServerConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = parse_args();
+
+    let replication_state = ReplicationState::new(&config);
 
     let port = &config.port;
     let addr = format!("127.0.0.1:{}", port);
@@ -20,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
         match listener.accept().await {
             Ok((stream, _)) => {
                 println!("accepted new connection");
-                let server = Server::new(stream, config.clone());
+                let server = Server::new(stream, config.clone(), replication_state.clone());
                 tokio::spawn(async move { handle_connection(server).await });
             }
             Err(e) => {

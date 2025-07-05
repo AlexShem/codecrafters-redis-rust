@@ -45,12 +45,20 @@ pub enum InfoCommand {
     // Future: Server, Client, Memory, etc
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum ServerRole {
+    Master,
+    Replica { host: String, port: String },
+}
+
 pub struct Server {
     pub reader: BufReader<OwnedReadHalf>,
     pub writer: BufWriter<OwnedWriteHalf>,
     pub storage: HashMap<String, String>,
     pub expiry_times: HashMap<String, u128>,
     pub config: ServerConfig,
+    pub replication_state: ReplicationState,
 }
 
 #[derive(Debug, Clone)]
@@ -61,8 +69,20 @@ pub struct ServerConfig {
     pub replicaof: Option<(String, String)>, // (host, port)
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicationState {
+    pub role: ServerRole,
+    pub master_replid: String,
+    pub master_repl_offset: u64,
+    // Future: connected_replicas, replication_backlog, etc.
+}
+
 impl Server {
-    pub fn new(stream: TcpStream, config: ServerConfig) -> Self {
+    pub fn new(
+        stream: TcpStream,
+        config: ServerConfig,
+        replication_state: ReplicationState,
+    ) -> Self {
         let (read, write) = stream.into_split();
         let reader = BufReader::new(read);
         let writer = BufWriter::new(write);
@@ -82,6 +102,7 @@ impl Server {
             storage,
             expiry_times,
             config,
+            replication_state,
         }
     }
 
@@ -310,25 +331,34 @@ impl Server {
                 }
             }
             Command::Info { subcommand } => {
-                if let Some(info_command) = subcommand {
-                    match info_command {
-                        Replication => {
-                            let role = match self.config.is_replica() {
-                                true => "slave",
-                                false => "master"
-                            };
-                            let response = format!("role:{}", role);
-                            format!("${}\r\n{}\r\n", response.len(), response)
-                        },
+                match subcommand {
+                    Some(Replication) | None => {
+                        let mut response = String::new();
+
+                        match &self.replication_state.role {
+                            ServerRole::Master => {
+                                response.push_str(&"role:master\r\n".to_string());
+                                response.push_str(&format!(
+                                    "master_replid:{}\r\n",
+                                    self.replication_state.master_replid
+                                ));
+                                response.push_str(&format!(
+                                    "master_repl_offset:{}\r\n",
+                                    self.replication_state.master_repl_offset
+                                ));
+                            }
+                            ServerRole::Replica { .. } => {
+                                response.push_str("role:slave\r\n");
+                                // For replicas, you might show master's replid/offset differently
+                            }
+                        }
+
+                        // Remove the trailing \r\n
+                        response.pop();
+                        response.pop();
+
+                        format!("${}\r\n{}\r\n", response.len(), response)
                     }
-                } else {
-                    // Print the entire info
-                    let role = match self.config.is_replica() {
-                        true => "slave",
-                        false => "master"
-                    };
-                    let response = format!("role:{}", role);
-                    format!("${}\r\n{}\r\n", response.len(), response)
                 }
             }
         }
@@ -336,8 +366,31 @@ impl Server {
 }
 
 impl ServerConfig {
-    fn is_replica(&self) -> bool {
+    fn _is_replica(&self) -> bool {
         self.replicaof.is_some()
+    }
+}
+
+impl ReplicationState {
+    pub fn new(config: &ServerConfig) -> Self {
+        let role = if config.replicaof.is_some() {
+            ServerRole::Replica {
+                host: config.replicaof.as_ref().unwrap().0.clone(),
+                port: config.replicaof.as_ref().unwrap().1.clone(),
+            }
+        } else {
+            ServerRole::Master
+        };
+
+        ReplicationState {
+            role,
+            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+            master_repl_offset: 0,
+        }
+    }
+
+    pub fn _is_master(&self) -> bool {
+        matches!(self.role, ServerRole::Master)
     }
 }
 
