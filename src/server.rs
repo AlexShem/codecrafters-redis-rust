@@ -58,6 +58,7 @@ pub struct ServerConfig {
     pub dir: String,
     pub dbfilename: String,
     pub port: String,
+    pub replicaof: Option<(String, String)>, // (host, port)
 }
 
 impl Server {
@@ -311,15 +312,32 @@ impl Server {
             Command::Info { subcommand } => {
                 if let Some(info_command) = subcommand {
                     match info_command {
-                        Replication => "$11\r\nrole:master\r\n".to_string(),
+                        Replication => {
+                            let role = match self.config.is_replica() {
+                                true => "slave",
+                                false => "master"
+                            };
+                            let response = format!("role:{}", role);
+                            format!("${}\r\n{}\r\n", response.len(), response)
+                        },
                     }
                 } else {
                     // Print the entire info
-                    // role:master for now
-                    "$11\r\nrole:master\r\n".to_string()
+                    let role = match self.config.is_replica() {
+                        true => "slave",
+                        false => "master"
+                    };
+                    let response = format!("role:{}", role);
+                    format!("${}\r\n{}\r\n", response.len(), response)
                 }
             }
         }
+    }
+}
+
+impl ServerConfig {
+    fn is_replica(&self) -> bool {
+        self.replicaof.is_some()
     }
 }
 

@@ -36,6 +36,7 @@ fn parse_args() -> ServerConfig {
     let mut dir = String::new();
     let mut dbfilename = String::new();
     let mut port = 6379u16;
+    let mut replicaof = None;
 
     let mut i = 1;
 
@@ -69,7 +70,34 @@ fn parse_args() -> ServerConfig {
                     i += 2;
                 } else {
                     eprintln!("Error: --port requires a value");
-                    std::process::exit(1);                }
+                    std::process::exit(1);
+                }
+            }
+            "--replicaof" => {
+                if i + 1 < args.len() {
+                    let replicaof_str = &args[i + 1];
+                    let parts: Vec<&str> = replicaof_str.split_whitespace().collect();
+
+                    if parts.len() != 2 {
+                        eprintln!("Error: --replicaof requires '<MASTER_HOST> <MASTER_PORT>' format");
+                        std::process::exit(1);
+                    }
+
+                    let host = parts[0].to_string();
+                    let port = parts[1];
+
+                    if port.parse::<u16>().is_err() {
+                        eprintln!("Error: MASTER_PORT must be a valid number");
+                        std::process::exit(1);
+                    }
+
+                    replicaof = Some((host, port.to_string()));
+
+                    i += 2;
+                } else {
+                    eprintln!("Error: --replicaof requires a value");
+                    std::process::exit(1);
+                }
             }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
@@ -81,7 +109,8 @@ fn parse_args() -> ServerConfig {
     ServerConfig {
         dir,
         dbfilename,
-        port: port.to_string()
+        port: port.to_string(),
+        replicaof
     }
 }
 
