@@ -5,15 +5,22 @@ use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
 pub enum ReplicationCommand {
+    /// PING
     Ping,
+    /// REPLCONF listening-port PORT
     ReplConfListeningPort(String),
+    /// REPLCONF capa psync2
     ReplConfCapa,
+    /// PSYNC replicationid offset
+    Psync(String, String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReplicationResponse {
     Pong,
     Ok,
+    /// +FULLRESYNC <REPL_ID> 0\r\n
+    FullResync,
     Error(String),
 }
 
@@ -29,6 +36,16 @@ impl Display for ReplicationCommand {
             ),
             ReplicationCommand::ReplConfCapa => {
                 write!(f, "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+            }
+            ReplicationCommand::Psync(repl_id, offset) => {
+                write!(
+                    f,
+                    "*3\r\n$5\r\nPSYNC\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                    repl_id.len(),
+                    repl_id,
+                    offset.len(),
+                    offset
+                )
             }
         }
     }
@@ -48,6 +65,7 @@ impl ReplicationResponse {
             ReplicationCommand::Ping => ReplicationResponse::Pong,
             ReplicationCommand::ReplConfListeningPort(_) => ReplicationResponse::Ok,
             ReplicationCommand::ReplConfCapa => ReplicationResponse::Ok,
+            ReplicationCommand::Psync(_, _) => ReplicationResponse::FullResync,
         }
     }
 }
@@ -68,12 +86,18 @@ impl ReplicationHandshake {
     }
 
     pub async fn execute_handshake(&mut self, replica_port: &str) -> Result<(), String> {
+        // Send PING
         self.send_and_validate(ReplicationCommand::Ping).await?;
+        // Send REPLCONF listening-port <REPLICA PORT>
         self.send_and_validate(ReplicationCommand::ReplConfListeningPort(
             replica_port.to_string(),
         ))
         .await?;
+        // Send REPLCONF capa psync2
         self.send_and_validate(ReplicationCommand::ReplConfCapa)
+            .await?;
+        // Send PSYNC replicationid offset
+        self.send_and_validate(ReplicationCommand::Psync("?".to_string(), "-1".to_string()))
             .await?;
 
         println!("✔️ Replication handshake completed successfully");
