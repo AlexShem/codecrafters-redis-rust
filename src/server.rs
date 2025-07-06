@@ -1,4 +1,5 @@
 use crate::rdb::RdbParser;
+use crate::replication::ReplicationCommand::{ReplConfCapa, ReplConfListeningPort};
 use crate::resp;
 use crate::resp::RespValue;
 use crate::server::InfoCommand::Replication;
@@ -33,6 +34,10 @@ pub enum Command {
     Keys { pattern: String },
     /// INFO command with optional subcommand
     Info { subcommand: Option<InfoCommand> },
+    /// REPLCONF command with two arguments
+    ReplConf {
+        args: crate::replication::ReplicationCommand,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +309,63 @@ impl Server {
                         }
                         Ok(Command::Info { subcommand: None })
                     }
+                    "REPLCONF" => {
+                        if elements.len() < 2 {
+                            return Err(anyhow!(
+                                "REPLCONF requires arguments <listening-port> or <capa>"
+                            ));
+                        }
+
+                        let argument = match &elements[1] {
+                            RespValue::BulkString(Some(arg)) => arg.to_lowercase(),
+                            _ => return Err(anyhow!("Invalid REPLCONF argument")),
+                        };
+
+                        match argument.as_str() {
+                            "listening-port" => {
+                                if elements.len() != 3 {
+                                    return Err(anyhow!(
+                                        "REPLCONF argument requires exactly one parameter"
+                                    ));
+                                }
+                                match &elements[2] {
+                                    RespValue::BulkString(Some(port)) => {
+                                        match port.parse::<u16>() {
+                                            Ok(_) => Ok(Command::ReplConf {
+                                                args: ReplConfListeningPort(port.clone()),
+                                            }),
+                                            Err(_) => Err(anyhow!(
+                                                "REPLCONF listening-port must be a valid number"
+                                            )),
+                                        }
+                                    }
+                                    _ => Err(anyhow!(
+                                        "REPLCONF listening-port argument must be a string"
+                                    )),
+                                }
+                            }
+                            "capa" => {
+                                if elements.len() != 3 {
+                                    return Err(anyhow!(
+                                        "REPLCONF argument requires exactly one parameter"
+                                    ));
+                                }
+                                match &elements[2] {
+                                    RespValue::BulkString(Some(capa)) => match capa.as_str() {
+                                        "psync2" => Ok(Command::ReplConf {
+                                            args: ReplConfCapa(capa.clone()),
+                                        }),
+                                        _ => Err(anyhow!(
+                                            "REPLCONF capa unsupported capability: {}",
+                                            capa
+                                        )),
+                                    },
+                                    _ => Err(anyhow!("REPLCONF capa argument must be a string")),
+                                }
+                            }
+                            _ => Err(anyhow!("Unknown REPLCONF argument: {}", argument)),
+                        }
+                    }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
             }
@@ -411,6 +473,11 @@ impl Server {
                     }
                 }
             }
+            Command::ReplConf { args: argument } => match argument {
+                ReplConfListeningPort(_port) => "+OK\r\n".to_string(),
+                ReplConfCapa(_capa) => "+OK\r\n".to_string(),
+                _ => format!("$-ERR unsupported REPLCONF argument: {}\r\n", argument),
+            },
         }
     }
 }

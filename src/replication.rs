@@ -10,7 +10,7 @@ pub enum ReplicationCommand {
     /// REPLCONF listening-port PORT
     ReplConfListeningPort(String),
     /// REPLCONF capa psync2
-    ReplConfCapa,
+    ReplConfCapa(String),
     /// PSYNC replicationid offset
     Psync(String, String),
 }
@@ -34,8 +34,8 @@ impl Display for ReplicationCommand {
                 port.len(),
                 port
             ),
-            ReplicationCommand::ReplConfCapa => {
-                write!(f, "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+            ReplicationCommand::ReplConfCapa(capa) => {
+                write!(f, "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n${}\r\n{}\r\n", capa.len(), capa)
             }
             ReplicationCommand::Psync(repl_id, offset) => {
                 write!(
@@ -64,7 +64,7 @@ impl ReplicationResponse {
         match cmd {
             ReplicationCommand::Ping => ReplicationResponse::Pong,
             ReplicationCommand::ReplConfListeningPort(_) => ReplicationResponse::Ok,
-            ReplicationCommand::ReplConfCapa => ReplicationResponse::Ok,
+            ReplicationCommand::ReplConfCapa(_) => ReplicationResponse::Ok,
             ReplicationCommand::Psync(_, _) => ReplicationResponse::FullResync,
         }
     }
@@ -94,7 +94,7 @@ impl ReplicationHandshake {
         ))
         .await?;
         // Send REPLCONF capa psync2
-        self.send_and_validate(ReplicationCommand::ReplConfCapa)
+        self.send_and_validate(ReplicationCommand::ReplConfCapa("psync2".to_string()))
             .await?;
         // Send PSYNC replicationid offset
         self.send_and_validate(ReplicationCommand::Psync("?".to_string(), "-1".to_string()))
