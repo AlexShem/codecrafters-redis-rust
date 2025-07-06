@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{BufReader, BufWriter};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 #[derive(Debug, Clone)]
 /// Represents a Redis command received from a client.
