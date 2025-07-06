@@ -38,6 +38,8 @@ pub enum Command {
     ReplConf {
         args: crate::replication::ReplicationCommand,
     },
+    /// PSYNC replication-ID replication-offset
+    Psync(String, String),
 }
 
 #[derive(Debug, Clone)]
@@ -366,6 +368,25 @@ impl Server {
                             _ => Err(anyhow!("Unknown REPLCONF argument: {}", argument)),
                         }
                     }
+                    "PSYNC" => {
+                        if elements.len() < 3 {
+                            return Err(anyhow!(
+                                "PSYNC requires exactly two arguments: replicationid and offset"
+                            ));
+                        }
+
+                        let replication_id = match &elements[1] {
+                            RespValue::BulkString(Some(id)) => id,
+                            _ => return Err(anyhow!("Invalid PSYNC replicationid argument")),
+                        };
+
+                        let offset = match &elements[2] {
+                            RespValue::BulkString(Some(off)) => off,
+                            _ => return Err(anyhow!("Invalid PSYNC offset argument")),
+                        };
+
+                        Ok(Command::Psync(replication_id.clone(), offset.clone()))
+                    }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
             }
@@ -478,6 +499,26 @@ impl Server {
                 ReplConfCapa(_capa) => "+OK\r\n".to_string(),
                 _ => format!("$-ERR unsupported REPLCONF argument: {}\r\n", argument),
             },
+            Command::Psync(repl_id, repl_offset) => {
+                if repl_id.as_str() != "?" {
+                    return format!("-ERR: Unsupported argument for REPL_ID: {}", repl_id);
+                }
+
+                if repl_offset.as_str() != "-1" {
+                    return format!(
+                        "-ERR: Unsupported argument for replication offset: {}",
+                        repl_offset
+                    );
+                }
+
+                if let ServerRole::Master(master_state) = &self.replication_state.role {
+                    let id = &master_state.replid;
+                    let offset = master_state.repl_offset;
+                    format!("+FULLRESYNC {} {}\r\n", id, offset)
+                } else {
+                    "-ERR: PSINC call is not allowed for the replica server".to_string()
+                }
+            }
         }
     }
 }
