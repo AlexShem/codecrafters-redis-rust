@@ -11,70 +11,118 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
+/// Represents a Redis command received from a client.
+/// Each variant corresponds to a supported Redis command with its parameters.
 pub enum Command {
+    /// Simple PING command that responds with PONG
     Ping,
+    /// ECHO command that returns the provided message
     Echo(String),
+    /// SET command to store a key-value pair with optional expiration time
     Set {
         key: String,
         value: String,
         expiry_ms: Option<u128>,
     },
-    Get {
-        key: String,
-    },
-    Config {
-        subcommand: ConfigCommand,
-    },
-    Keys {
-        pattern: String,
-    },
-    Info {
-        subcommand: Option<InfoCommand>,
-    },
+    /// GET command to retrieve a value by key
+    Get { key: String },
+    /// CONFIG command with its subcommands
+    Config { subcommand: ConfigCommand },
+    /// KEYS command to find keys matching a pattern
+    Keys { pattern: String },
+    /// INFO command with optional subcommand
+    Info { subcommand: Option<InfoCommand> },
 }
 
 #[derive(Debug, Clone)]
+/// Represents available subcommands for the CONFIG command
 pub enum ConfigCommand {
+    /// CONFIG GET to retrieve configuration parameters
     Get { parameter: String },
     // Future: Set {parameter, value}
 }
 
 #[derive(Debug, Clone)]
+/// Represents available subcommands for the INFO command
 pub enum InfoCommand {
+    /// Replication info
+    /// This is used to get the replication state of the server.
+    /// Can be used by both master and replica.
     Replication,
     // Future: Server, Client, Memory, etc
 }
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
+/// Defines the role of a server in a replication setup
 pub enum ServerRole {
-    Master,
-    Replica { host: String, port: String },
+    /// The server is acting as a master in the replication setup.
+    /// Contains state specific to master servers.
+    Master(MasterState),
+    /// The server is acting as a replica in the replication setup.
+    /// Contains state specific to replica servers.
+    Replica(ReplicaState),
 }
 
+/// Main server structure that handles client connections and commands
 pub struct Server {
+    /// Reader for incoming client data
     pub reader: BufReader<OwnedReadHalf>,
+    /// Writer for outgoing server responses
     pub writer: BufWriter<OwnedWriteHalf>,
+    /// In-memory key-value storage
     pub storage: HashMap<String, String>,
+    /// Maps keys to their expiration times in milliseconds
     pub expiry_times: HashMap<String, u128>,
+    /// Server configuration parameters
     pub config: ServerConfig,
+    /// Current replication state of the server
     pub replication_state: ReplicationState,
 }
 
 #[derive(Debug, Clone)]
+/// Configuration parameters for the Redis server
 pub struct ServerConfig {
+    /// Directory where persistence files are stored
     pub dir: String,
+    /// Filename for the RDB database file
     pub dbfilename: String,
+    /// Port the server listens on
     pub port: String,
-    pub replicaof: Option<(String, String)>, // (host, port)
+    /// Master server information if this is a replica (host, port)
+    pub replicaof: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
+/// Represents the state of the server's replication.
+/// It can be either a master or a replica.
 pub struct ReplicationState {
+    /// The role of the server in the replication setup.
     pub role: ServerRole,
-    pub master_replid: String,
-    pub master_repl_offset: u64,
-    // Future: connected_replicas, replication_backlog, etc.
+}
+
+#[derive(Debug, Clone)]
+/// Contains state information specific to a master server
+pub struct MasterState {
+    /// Unique replication ID of this master
+    pub replid: String,
+    /// Current replication offset (position in replication stream)
+    pub repl_offset: u64,
+    // Future: connected_replicas: Vec<ReplicaConnection>
+    // Future: replication_backlog: Vec<u8>
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+/// Contains state information specific to a replica server
+pub struct ReplicaState {
+    /// Hostname of the master server
+    pub master_host: String,
+    /// Port of the master server
+    pub master_port: String,
+    // Future: master_connection: Option<TcpStream>
+    // Future: handshake_state: HandshakeState
+    // Future: master_replid: String, master_repl_offset: u64
 }
 
 impl Server {
@@ -336,15 +384,15 @@ impl Server {
                         let mut response = String::new();
 
                         match &self.replication_state.role {
-                            ServerRole::Master => {
+                            ServerRole::Master(master_state) => {
                                 response.push_str(&"role:master\r\n".to_string());
                                 response.push_str(&format!(
                                     "master_replid:{}\r\n",
-                                    self.replication_state.master_replid
+                                    master_state.replid
                                 ));
                                 response.push_str(&format!(
                                     "master_repl_offset:{}\r\n",
-                                    self.replication_state.master_repl_offset
+                                    master_state.repl_offset
                                 ));
                             }
                             ServerRole::Replica { .. } => {
@@ -366,31 +414,30 @@ impl Server {
 }
 
 impl ServerConfig {
-    fn _is_replica(&self) -> bool {
+    fn is_replica(&self) -> bool {
         self.replicaof.is_some()
     }
 }
 
 impl ReplicationState {
     pub fn new(config: &ServerConfig) -> Self {
-        let role = if config.replicaof.is_some() {
-            ServerRole::Replica {
-                host: config.replicaof.as_ref().unwrap().0.clone(),
-                port: config.replicaof.as_ref().unwrap().1.clone(),
-            }
+        let role = if config.is_replica() {
+            ServerRole::Replica(ReplicaState {
+                master_host: config.replicaof.as_ref().unwrap().0.clone(),
+                master_port: config.replicaof.as_ref().unwrap().1.clone(),
+            })
         } else {
-            ServerRole::Master
+            ServerRole::Master(MasterState {
+                replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+                repl_offset: 0,
+            })
         };
 
-        ReplicationState {
-            role,
-            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
-            master_repl_offset: 0,
-        }
+        ReplicationState { role }
     }
 
     pub fn _is_master(&self) -> bool {
-        matches!(self.role, ServerRole::Master)
+        matches!(self.role, ServerRole::Master(_))
     }
 }
 

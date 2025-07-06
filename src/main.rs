@@ -3,14 +3,21 @@ mod resp;
 mod rdb;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener};
-use crate::server::{ReplicationState, Server, ServerConfig};
+use tokio::net::{TcpListener, TcpStream};
+use crate::server::{ReplicationState, Server, ServerConfig, ServerRole};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = parse_args();
 
     let replication_state = ReplicationState::new(&config);
+
+    if let ServerRole::Replica(_) = replication_state.role {
+        let replication_state_clone = replication_state.clone();
+        tokio::spawn(async move {
+            initiate_replication_handshake(replication_state_clone).await;
+        });
+    }
 
     let port = &config.port;
     let addr = format!("127.0.0.1:{}", port);
@@ -27,6 +34,40 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(e) => {
                 println!("error: {}", e);
+            }
+        }
+    }
+}
+
+async fn initiate_replication_handshake(replication_state: ReplicationState) {
+    if let ServerRole::Replica(replica_state) = replication_state.role {
+        let master_addr = format!("{}:{}", replica_state.master_host, replica_state.master_port);
+
+        // Step 1: Connect to master
+        match TcpStream::connect(&master_addr).await {
+            Ok(mut stream) => {
+                println!("Connected to master at {}", master_addr);
+
+                // Step 2: Send PING command
+                let ping_command = "*1\r\n$4\r\nPING\r\n";
+
+                match stream.write_all(ping_command.as_bytes()).await {
+                    Ok(_) => {
+                        println!("Sent PING to master");
+
+                        // Step 3: Read response (optional for this stage)
+                        // You might want to verify the PONG response
+
+                        // TODO: Keep connection alive for future stages
+                        // TODO: Continue with REPLCONF commands in next stages
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send PING to master: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to connect to master at {}: {}", master_addr, e);
             }
         }
     }
