@@ -5,6 +5,7 @@ use crate::server::InfoCommand::Replication;
 use anyhow::anyhow;
 use resp::RespParser;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -120,6 +121,7 @@ pub struct ReplicaState {
     pub master_host: String,
     /// Port of the master server
     pub master_port: String,
+    pub replica_port: String,
     // Future: master_connection: Option<TcpStream>
     // Future: handshake_state: HandshakeState
     // Future: master_replid: String, master_repl_offset: u64
@@ -425,6 +427,7 @@ impl ReplicationState {
             ServerRole::Replica(ReplicaState {
                 master_host: config.replicaof.as_ref().unwrap().0.clone(),
                 master_port: config.replicaof.as_ref().unwrap().1.clone(),
+                replica_port: config.port.clone(),
             })
         } else {
             ServerRole::Master(MasterState {
@@ -438,6 +441,21 @@ impl ReplicationState {
 
     pub fn _is_master(&self) -> bool {
         matches!(self.role, ServerRole::Master(_))
+    }
+}
+
+impl Display for Command {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Command::Ping => write!(f, "*1\r\n$4\r\nPING\r\n"),
+            Command::Echo(msg) => write!(f, "*2\r\n$4\r\nECHO\r\n${}\r\n{}\r\n", msg.len(), msg),
+            // Command::Set { .. } => {}
+            // Command::Get { .. } => {}
+            // Command::Config { .. } => {}
+            // Command::Keys { .. } => {}
+            // Command::Info { .. } => {}
+            _ => write!(f, ""),
+        }
     }
 }
 

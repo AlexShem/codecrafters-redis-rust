@@ -4,7 +4,7 @@ mod rdb;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use crate::server::{ReplicationState, Server, ServerConfig, ServerRole};
+use crate::server::{Command, ReplicationState, Server, ServerConfig, ServerRole};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,20 +49,97 @@ async fn initiate_replication_handshake(replication_state: ReplicationState) {
                 println!("Connected to master at {}", master_addr);
 
                 // Step 2: Send PING command
-                let ping_command = "*1\r\n$4\r\nPING\r\n";
+                let ping_command = Command::Ping;
+                let ping_bytes = ping_command.to_string();
 
-                match stream.write_all(ping_command.as_bytes()).await {
+                match stream.write_all(ping_bytes.as_bytes()).await {
                     Ok(_) => {
                         println!("Sent PING to master");
 
-                        // Step 3: Read response (optional for this stage)
+                        // Step 3: Read response
                         // You might want to verify the PONG response
+                        let mut response_buf = [0; 1024];
+                        match stream.read(&mut response_buf).await {
+                            Ok(bytes_read) => {
+                                let response = String::from_utf8_lossy(&response_buf[..bytes_read]);
+                                println!("Received from master: {:?}", response);
 
-                        // TODO: Keep connection alive for future stages
-                        // TODO: Continue with REPLCONF commands in next stages
+                                if response.trim() == "+PONG" {
+                                    println!("✔️ PING handshake successful");
+                                } else {
+                                    eprintln!("❌ Unexpected response to PING: {}", response);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read PONG response: {}", e);
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("Failed to send PING to master: {}", e);
+                    }
+                }
+
+                // Step 4. Send REPLCONF command
+                // Step 4.1. REPLCONF listening-port <PORT>
+                let replcong_listen_port_command = format!(
+                    "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
+                    replica_state.replica_port.len(),
+                    replica_state.replica_port
+                );
+
+                match stream.write_all(replcong_listen_port_command.as_bytes()).await {
+                    Ok(_) => {
+                        println!("Sent REPLCONF listening-port to master");
+
+                        let mut response_buf = [0; 1024];
+                        match stream.read(&mut response_buf).await {
+                            Ok(bytes_read) => {
+                                let response = String::from_utf8_lossy(&response_buf[..bytes_read]);
+                                println!("Received from master: {:?}", response);
+
+                                if response.trim() == "+OK" {
+                                    println!("✔️ REPLCONF handshake successful");
+                                } else {
+                                    eprintln!("❌ Unexpected response to REPLCONF: {}", response);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read REPLCONF response: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send REPLCONF to master: {}", e);
+                    }
+                }
+
+                // Step 4.2. REPLCONF capa psync2
+                let replcong_capa_command = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+
+                match stream.write_all(replcong_capa_command.as_bytes()).await {
+                    Ok(_) => {
+                        println!("Sent REPLCONF capa to master");
+
+                        let mut response_buf = [0; 1024];
+                        match stream.read(&mut response_buf).await {
+                            Ok(bytes_read) => {
+                                let response = String::from_utf8_lossy(&response_buf[..bytes_read]);
+                                println!("Received from master: {:?}", response);
+
+                                if response.trim() == "+OK" {
+                                    println!("✔️ REPLCONF handshake successful");
+                                } else {
+                                    eprintln!("❌ Unexpected response to REPLCONF: {}", response);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read REPLCONF response: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send REPLCONF to master: {}", e);
                     }
                 }
             }
