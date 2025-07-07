@@ -1,64 +1,19 @@
+use crate::commands::{
+    CommandContext, ConfigCommand, ExecutionContext, InfoCommand, RedisCommand, RedisResponse,
+    ReplConfArgs,
+};
 use crate::rdb::RdbParser;
-use crate::replication::ReplicationCommand::{ReplConfCapa, ReplConfListeningPort};
+use crate::rdb_handler::RdbHandler;
+use crate::replication_master::ReplicationMaster;
 use crate::resp;
 use crate::resp::RespValue;
-use crate::server::InfoCommand::Replication;
 use anyhow::anyhow;
 use resp::RespParser;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-
-#[derive(Debug, Clone)]
-/// Represents a Redis command received from a client.
-/// Each variant corresponds to a supported Redis command with its parameters.
-pub enum Command {
-    /// Simple PING command that responds with PONG
-    Ping,
-    /// ECHO command that returns the provided message
-    Echo(String),
-    /// SET command to store a key-value pair with optional expiration time
-    Set {
-        key: String,
-        value: String,
-        expiry_ms: Option<u128>,
-    },
-    /// GET command to retrieve a value by key
-    Get { key: String },
-    /// CONFIG command with its subcommands
-    Config { subcommand: ConfigCommand },
-    /// KEYS command to find keys matching a pattern
-    Keys { pattern: String },
-    /// INFO command with optional subcommand
-    Info { subcommand: Option<InfoCommand> },
-    /// REPLCONF command with two arguments
-    ReplConf {
-        args: crate::replication::ReplicationCommand,
-    },
-    /// PSYNC replication-ID replication-offset
-    Psync(String, String),
-}
-
-#[derive(Debug, Clone)]
-/// Represents available subcommands for the CONFIG command
-pub enum ConfigCommand {
-    /// CONFIG GET to retrieve configuration parameters
-    Get { parameter: String },
-    // Future: Set {parameter, value}
-}
-
-#[derive(Debug, Clone)]
-/// Represents available subcommands for the INFO command
-pub enum InfoCommand {
-    /// Replication info
-    /// This is used to get the replication state of the server.
-    /// Can be used by both master and replica.
-    Replication,
-    // Future: Server, Client, Memory, etc
-}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -86,6 +41,7 @@ pub struct Server {
     pub config: ServerConfig,
     /// Current replication state of the server
     pub replication_state: ReplicationState,
+    pub _replication_master: Option<ReplicationMaster>,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +109,11 @@ impl Server {
             expiry_times = rdb_data.expiry_times;
         }
 
+        let replication_master = match &replication_state.role {
+            ServerRole::Master(_) => Some(ReplicationMaster::new(replication_state.clone())),
+            ServerRole::Replica(_) => None,
+        };
+
         Server {
             reader,
             writer,
@@ -160,6 +121,7 @@ impl Server {
             expiry_times,
             config,
             replication_state,
+            _replication_master: replication_master,
         }
     }
 
@@ -178,7 +140,7 @@ impl Server {
         }
     }
 
-    pub fn parse_command(&mut self, command_raw: String) -> anyhow::Result<Command> {
+    pub fn parse_command(&mut self, command_raw: String) -> anyhow::Result<RedisCommand> {
         let resp_value = RespParser::parse(&command_raw)?;
 
         match resp_value {
@@ -193,13 +155,13 @@ impl Server {
                 };
 
                 match command_name.as_str() {
-                    "PING" => Ok(Command::Ping),
+                    "PING" => Ok(RedisCommand::Ping),
                     "ECHO" => {
                         if elements.len() != 2 {
                             return Err(anyhow!("ECHO requires exactly 1 argument"));
                         }
                         match &elements[1] {
-                            RespValue::BulkString(Some(arg)) => Ok(Command::Echo(arg.clone())),
+                            RespValue::BulkString(Some(arg)) => Ok(RedisCommand::Echo(arg.clone())),
                             _ => Err(anyhow!("ECHO argument must be a string")),
                         }
                     }
@@ -231,8 +193,7 @@ impl Server {
                                 }
                             }
                         }
-
-                        Ok(Command::Set {
+                        Ok(RedisCommand::Set {
                             key,
                             value,
                             expiry_ms,
@@ -245,7 +206,7 @@ impl Server {
 
                         match &elements[1] {
                             RespValue::BulkString(Some(key)) => {
-                                Ok(Command::Get { key: key.clone() })
+                                Ok(RedisCommand::Get { key: key.clone() })
                             }
                             _ => Err(anyhow::anyhow!("GET key must be a string")),
                         }
@@ -268,11 +229,13 @@ impl Server {
                                     ));
                                 }
                                 match &elements[2] {
-                                    RespValue::BulkString(Some(parameter)) => Ok(Command::Config {
-                                        subcommand: ConfigCommand::Get {
-                                            parameter: parameter.clone(),
-                                        },
-                                    }),
+                                    RespValue::BulkString(Some(parameter)) => {
+                                        Ok(RedisCommand::Config {
+                                            subcommand: ConfigCommand::Get {
+                                                parameter: parameter.clone(),
+                                            },
+                                        })
+                                    }
                                     _ => Err(anyhow!("CONFIG GET parameter must be a string")),
                                 }
                             }
@@ -285,7 +248,7 @@ impl Server {
                         }
 
                         match &elements[1] {
-                            RespValue::BulkString(Some(pattern)) => Ok(Command::Keys {
+                            RespValue::BulkString(Some(pattern)) => Ok(RedisCommand::Keys {
                                 pattern: pattern.clone(),
                             }),
                             _ => Err(anyhow::anyhow!("KEYS pattern must be a string")),
@@ -303,13 +266,13 @@ impl Server {
 
                         if let Some(cmd) = subcommand {
                             return match cmd.as_str() {
-                                "REPLICATION" => Ok(Command::Info {
-                                    subcommand: Some(Replication),
+                                "REPLICATION" => Ok(RedisCommand::Info {
+                                    subcommand: Some(InfoCommand::Replication),
                                 }),
                                 _ => Err(anyhow::anyhow!("Unsupported INFO command: {}", cmd)),
                             };
                         }
-                        Ok(Command::Info { subcommand: None })
+                        Ok(RedisCommand::Info { subcommand: None })
                     }
                     "REPLCONF" => {
                         if elements.len() < 2 {
@@ -333,8 +296,8 @@ impl Server {
                                 match &elements[2] {
                                     RespValue::BulkString(Some(port)) => {
                                         match port.parse::<u16>() {
-                                            Ok(_) => Ok(Command::ReplConf {
-                                                args: ReplConfListeningPort(port.clone()),
+                                            Ok(_) => Ok(RedisCommand::ReplConf {
+                                                args: ReplConfArgs::ListeningPort(port.clone()),
                                             }),
                                             Err(_) => Err(anyhow!(
                                                 "REPLCONF listening-port must be a valid number"
@@ -354,8 +317,8 @@ impl Server {
                                 }
                                 match &elements[2] {
                                     RespValue::BulkString(Some(capa)) => match capa.as_str() {
-                                        "psync2" => Ok(Command::ReplConf {
-                                            args: ReplConfCapa(capa.clone()),
+                                        "psync2" => Ok(RedisCommand::ReplConf {
+                                            args: ReplConfArgs::Capa(capa.clone()),
                                         }),
                                         _ => Err(anyhow!(
                                             "REPLCONF capa unsupported capability: {}",
@@ -385,7 +348,10 @@ impl Server {
                             _ => return Err(anyhow!("Invalid PSYNC offset argument")),
                         };
 
-                        Ok(Command::Psync(replication_id.clone(), offset.clone()))
+                        Ok(RedisCommand::Psync {
+                            repl_id: replication_id.clone(),
+                            offset: offset.clone(),
+                        })
                     }
                     _ => Err(anyhow::anyhow!("Unknown command: {}", command_name)),
                 }
@@ -394,49 +360,76 @@ impl Server {
         }
     }
 
-    pub fn execute_command(&mut self, command: Command) -> String {
+    pub fn execute_command(&mut self, command_ctx: CommandContext) -> RedisResponse {
+        match (&command_ctx.command, &command_ctx.context) {
+            (RedisCommand::Ping, ExecutionContext::Client) => RedisResponse::Pong,
+            (RedisCommand::Ping, ExecutionContext::Replication) => RedisResponse::Pong,
+            (RedisCommand::ReplConf { args: _args }, ExecutionContext::Replication) => {
+                RedisResponse::Ok
+            }
+            (RedisCommand::Psync { repl_id, offset }, ExecutionContext::Replication) => {
+                if let ServerRole::Master(master_state) = &self.replication_state.role {
+                    // Validate PSYNC parameters
+                    if repl_id != "?" || offset != "-1" {
+                        return RedisResponse::Error("Invalid PSYNC parameters".to_string());
+                    }
+
+                    RedisResponse::FullResync {
+                        repl_id: master_state.replid.clone(),
+                        offset: master_state.repl_offset,
+                    }
+                } else {
+                    RedisResponse::Error("PSYNC not allowed for replica".to_string())
+                }
+            }
+            // Handle other commands with Client context
+            _ => self.execute_redis_command(&command_ctx.command),
+        }
+    }
+
+    pub fn execute_redis_command(&mut self, command: &RedisCommand) -> RedisResponse {
         match command {
-            Command::Ping => "+PONG\r\n".to_string(),
-            Command::Echo(msg) => format!("${}\r\n{}\r\n", msg.len(), msg),
-            Command::Set {
+            RedisCommand::Ping => RedisResponse::Pong,
+            RedisCommand::Echo(msg) => RedisResponse::BulkString(Some(msg.clone())),
+            RedisCommand::Set {
                 key,
                 value,
                 expiry_ms,
             } => {
-                self.storage.insert(key.clone(), value);
+                self.storage.insert(key.clone(), value.clone());
                 if let Some(expiry_ms) = expiry_ms {
                     let expiry_time = Self::current_time_ms() + expiry_ms;
-                    self.expiry_times.insert(key, expiry_time);
+                    self.expiry_times.insert(key.clone(), expiry_time);
                 }
-                "+OK\r\n".to_string()
+                RedisResponse::Ok
             }
-            Command::Get { key } => {
-                if self.storage.contains_key(&key) && !self.is_expired(&key) {
-                    let value = self.storage.get(&key).unwrap();
-                    format!("${}\r\n{}\r\n", value.len(), value)
+            RedisCommand::Get { key } => {
+                if self.storage.contains_key(key) && !self.is_expired(key) {
+                    let value = self.storage.get(key).unwrap();
+                    RedisResponse::BulkString(Some(value.clone()))
                 } else {
                     if self.is_expired(&key) {
-                        self.storage.remove(&key);
-                        self.expiry_times.remove(&key);
+                        self.storage.remove(key);
+                        self.expiry_times.remove(key);
                     }
-                    "$-1\r\n".to_string()
+                    RedisResponse::BulkString(None)
                 }
             }
-            Command::Config { subcommand } => match subcommand {
+            RedisCommand::Config { subcommand } => match subcommand {
                 ConfigCommand::Get { parameter } => match parameter.as_str() {
                     "dir" => {
                         let elements = vec!["dir".to_string(), self.config.dir.clone()];
-                        format_resp_array(&elements)
+                        RedisResponse::Array(elements)
                     }
                     "dbfilename" => {
                         let elements =
                             vec!["dbfilename".to_string(), self.config.dbfilename.clone()];
-                        format_resp_array(&elements)
+                        RedisResponse::Array(elements)
                     }
-                    _ => format!("$-ERR unknown parameter: {}\r\n", parameter),
+                    _ => RedisResponse::Error(format!("unknown parameter: {}", parameter)),
                 },
             },
-            Command::Keys { pattern } => {
+            RedisCommand::Keys { pattern } => {
                 if pattern == "*" {
                     // Get all non-expired keys
                     let mut keys: Vec<String> = self
@@ -457,15 +450,15 @@ impl Server {
                     // Filter out expired keys
                     keys.retain(|key| !self.is_expired(key));
 
-                    format_resp_array(&keys)
+                    RedisResponse::Array(keys)
                 } else {
                     // For now, only support "*" pattern
-                    "-ERR pattern not supported\r\n".to_string()
+                    RedisResponse::Error(format!("KEYS pattern not supported: {}", pattern))
                 }
             }
-            Command::Info { subcommand } => {
+            RedisCommand::Info { subcommand } => {
                 match subcommand {
-                    Some(Replication) | None => {
+                    Some(InfoCommand::Replication) | None => {
                         let mut response = String::new();
 
                         match &self.replication_state.role {
@@ -490,36 +483,53 @@ impl Server {
                         response.pop();
                         response.pop();
 
-                        format!("${}\r\n{}\r\n", response.len(), response)
+                        RedisResponse::BulkString(Some(response))
                     }
+                    _ => RedisResponse::Error(format!(
+                        "Unsupported INFO subcommand: {:?}",
+                        subcommand.as_ref()
+                    )),
                 }
             }
-            Command::ReplConf { args: argument } => match argument {
-                ReplConfListeningPort(_port) => "+OK\r\n".to_string(),
-                ReplConfCapa(_capa) => "+OK\r\n".to_string(),
-                _ => format!("$-ERR unsupported REPLCONF argument: {}\r\n", argument),
+            RedisCommand::ReplConf { args: argument } => match argument {
+                ReplConfArgs::ListeningPort(_port) => RedisResponse::Ok,
+                ReplConfArgs::Capa(_capa) => RedisResponse::Ok,
             },
-            Command::Psync(repl_id, repl_offset) => {
+            RedisCommand::Psync { repl_id, offset } => {
                 if repl_id.as_str() != "?" {
-                    return format!("-ERR: Unsupported argument for REPL_ID: {}", repl_id);
+                    return RedisResponse::Error(format!(
+                        "Unsupported argument for REPL_ID: {}",
+                        repl_id
+                    ));
                 }
 
-                if repl_offset.as_str() != "-1" {
-                    return format!(
-                        "-ERR: Unsupported argument for replication offset: {}",
-                        repl_offset
-                    );
+                if offset.as_str() != "-1" {
+                    return RedisResponse::Error(format!(
+                        "Unsupported argument for replication offset: {}",
+                        offset
+                    ));
                 }
 
                 if let ServerRole::Master(master_state) = &self.replication_state.role {
                     let id = &master_state.replid;
                     let offset = master_state.repl_offset;
-                    format!("+FULLRESYNC {} {}\r\n", id, offset)
+                    RedisResponse::FullResync {
+                        repl_id: id.to_owned(),
+                        offset,
+                    }
                 } else {
-                    "-ERR: PSINC call is not allowed for the replica server".to_string()
+                    RedisResponse::Error(
+                        "PSINC call is not allowed for the replica server".to_string(),
+                    )
                 }
             }
         }
+    }
+
+    pub fn get_rdb_file_response(&self) -> RedisResponse {
+        let rdb_data = RdbHandler::get_empty_rdb_file();
+        let formatted_rdb = RdbHandler::format_rdb_transfer(&rdb_data);
+        RedisResponse::RdbFile(formatted_rdb)
     }
 }
 
@@ -550,28 +560,4 @@ impl ReplicationState {
     pub fn _is_master(&self) -> bool {
         matches!(self.role, ServerRole::Master(_))
     }
-}
-
-impl Display for Command {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Command::Ping => write!(f, "*1\r\n$4\r\nPING\r\n"),
-            Command::Echo(msg) => write!(f, "*2\r\n$4\r\nECHO\r\n${}\r\n{}\r\n", msg.len(), msg),
-            // Command::Set { .. } => {}
-            // Command::Get { .. } => {}
-            // Command::Config { .. } => {}
-            // Command::Keys { .. } => {}
-            // Command::Info { .. } => {}
-            _ => write!(f, ""),
-        }
-    }
-}
-
-fn format_resp_array(elements: &[String]) -> String {
-    let mut result = format!("*{}\r\n", elements.len());
-
-    for element in elements {
-        result.push_str(&format!("${}\r\n{}\r\n", element.len(), element))
-    }
-    result
 }

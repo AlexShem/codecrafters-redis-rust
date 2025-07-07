@@ -1,8 +1,12 @@
+mod commands;
 mod rdb;
+mod rdb_handler;
 mod replication;
+mod replication_master;
 mod resp;
 mod server;
 
+use crate::commands::{CommandContext, ExecutionContext, RedisCommand, RedisResponse};
 use crate::replication::initiate_replication_handshake;
 use crate::server::{ReplicationState, Server, ServerConfig, ServerRole};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -135,16 +139,64 @@ async fn handle_connection(mut server: Server) {
 
                 match server.parse_command(command_raw) {
                     Ok(command) => {
-                        let response = server.execute_command(command);
-                        println!("Response: {:?}", response);
-                        server.writer.write_all(response.as_bytes()).await.unwrap();
-                        server.writer.flush().await.unwrap();
+                        if matches!(command, RedisCommand::Psync { .. })
+                            && matches!(server.replication_state.role, ServerRole::Master(_))
+                        {
+                            // Send FULLRESYNC response first
+                            let fullresync_response = server.execute_command(CommandContext {
+                                command,
+                                context: ExecutionContext::Replication,
+                            });
+
+                            server
+                                .writer
+                                .write_all(fullresync_response.to_bytes().as_slice())
+                                .await
+                                .unwrap();
+                            server.writer.flush().await.unwrap();
+
+                            // Then send RDB file using the response system
+                            let rdb_response = server.get_rdb_file_response();
+                            server
+                                .writer
+                                .write_all(rdb_response.to_bytes().as_slice())
+                                .await
+                                .unwrap();
+                            server.writer.flush().await.unwrap();
+                        } else {
+                            // Handle normal commands
+                            let response = match &server.replication_state.role {
+                                ServerRole::Master(_master_state) => {
+                                    server.execute_command(CommandContext {
+                                        command,
+                                        context: ExecutionContext::Client,
+                                    })
+                                }
+                                ServerRole::Replica(_replica_state) => {
+                                    server.execute_command(CommandContext {
+                                        command,
+                                        context: ExecutionContext::Replication,
+                                    })
+                                }
+                            };
+
+                            server
+                                .writer
+                                .write_all(response.to_bytes().as_slice())
+                                .await
+                                .unwrap();
+                            server.writer.flush().await.unwrap();
+                        }
                     }
                     Err(e) => {
                         println!("Parse error: {}", e);
                         server
                             .writer
-                            .write_all(b"-ERR unknown command\r\n")
+                            .write_all(
+                                RedisResponse::Error("Unknown command".to_string())
+                                    .to_resp_string()
+                                    .as_bytes(),
+                            )
                             .await
                             .unwrap();
                         server.writer.flush().await.unwrap();

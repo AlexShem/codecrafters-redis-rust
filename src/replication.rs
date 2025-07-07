@@ -1,74 +1,8 @@
+use crate::commands::ReplConfArgs::{Capa, ListeningPort};
+use crate::commands::{RedisCommand, RedisResponse};
 use crate::server::{ReplicationState, ServerRole};
-use std::fmt::Display;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-
-#[derive(Debug, Clone)]
-pub enum ReplicationCommand {
-    /// PING
-    Ping,
-    /// REPLCONF listening-port PORT
-    ReplConfListeningPort(String),
-    /// REPLCONF capa psync2
-    ReplConfCapa(String),
-    /// PSYNC replicationid offset
-    Psync(String, String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ReplicationResponse {
-    Pong,
-    Ok,
-    /// +FULLRESYNC <REPL_ID> 0\r\n
-    FullResync,
-    Error(String),
-}
-
-impl Display for ReplicationCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReplicationCommand::Ping => write!(f, "*1\r\n$4\r\nPING\r\n"),
-            ReplicationCommand::ReplConfListeningPort(port) => write!(
-                f,
-                "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
-                port.len(),
-                port
-            ),
-            ReplicationCommand::ReplConfCapa(capa) => {
-                write!(f, "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n${}\r\n{}\r\n", capa.len(), capa)
-            }
-            ReplicationCommand::Psync(repl_id, offset) => {
-                write!(
-                    f,
-                    "*3\r\n$5\r\nPSYNC\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
-                    repl_id.len(),
-                    repl_id,
-                    offset.len(),
-                    offset
-                )
-            }
-        }
-    }
-}
-
-impl ReplicationResponse {
-    pub fn from_raw(raw: &str) -> Self {
-        match raw.trim() {
-            "+PONG" => ReplicationResponse::Pong,
-            "+OK" => ReplicationResponse::Ok,
-            _ => ReplicationResponse::Error(raw.to_string()),
-        }
-    }
-
-    pub fn expected_for_command(cmd: &ReplicationCommand) -> Self {
-        match cmd {
-            ReplicationCommand::Ping => ReplicationResponse::Pong,
-            ReplicationCommand::ReplConfListeningPort(_) => ReplicationResponse::Ok,
-            ReplicationCommand::ReplConfCapa(_) => ReplicationResponse::Ok,
-            ReplicationCommand::Psync(_, _) => ReplicationResponse::FullResync,
-        }
-    }
-}
 
 pub struct ReplicationHandshake {
     stream: TcpStream,
@@ -87,24 +21,29 @@ impl ReplicationHandshake {
 
     pub async fn execute_handshake(&mut self, replica_port: &str) -> Result<(), String> {
         // Send PING
-        self.send_and_validate(ReplicationCommand::Ping).await?;
+        self.send_and_validate(RedisCommand::Ping).await?;
         // Send REPLCONF listening-port <REPLICA PORT>
-        self.send_and_validate(ReplicationCommand::ReplConfListeningPort(
-            replica_port.to_string(),
-        ))
+        self.send_and_validate(RedisCommand::ReplConf {
+            args: ListeningPort(replica_port.to_string()),
+        })
         .await?;
         // Send REPLCONF capa psync2
-        self.send_and_validate(ReplicationCommand::ReplConfCapa("psync2".to_string()))
-            .await?;
+        self.send_and_validate(RedisCommand::ReplConf {
+            args: Capa("psync2".to_string()),
+        })
+        .await?;
         // Send PSYNC replicationid offset
-        self.send_and_validate(ReplicationCommand::Psync("?".to_string(), "-1".to_string()))
-            .await?;
+        self.send_and_validate(RedisCommand::Psync {
+            repl_id: "?".to_string(),
+            offset: "-1".to_string(),
+        })
+        .await?;
 
         println!("✔️ Replication handshake completed successfully");
         Ok(())
     }
 
-    async fn send_and_validate(&mut self, cmd: ReplicationCommand) -> Result<(), String> {
+    async fn send_and_validate(&mut self, cmd: RedisCommand) -> Result<(), String> {
         // Send command
         let cmd_str = cmd.to_string();
         self.stream
@@ -124,8 +63,8 @@ impl ReplicationHandshake {
         println!("Received from master: {:?}", raw_response);
 
         // Validate response
-        let response = ReplicationResponse::from_raw(&raw_response);
-        let expected = ReplicationResponse::expected_for_command(&cmd);
+        let response = RedisResponse::from_raw(&raw_response);
+        let expected = RedisResponse::expected_for_command(&cmd);
 
         if response == expected {
             println!("✔️ {:?} successful", cmd);
