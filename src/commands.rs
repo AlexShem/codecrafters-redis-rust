@@ -60,9 +60,12 @@ pub enum ReplConfArgs {
 
 #[derive(Debug, Clone)]
 pub enum ExecutionContext {
-    Client,       // Command from client
-    Replication,  // Command for replication handshake
-    _Propagation, // Command being propagated to replicas
+    /// Command from client
+    Client,
+    /// Command for replication handshake
+    Replication,
+    /// Command being propagated to replicas
+    _Propagation,
 }
 
 #[derive(Debug, Clone)]
@@ -139,7 +142,16 @@ impl Display for RedisCommand {
             RedisCommand::Echo(msg) => {
                 write!(f, "*2\r\n$4\r\nECHO\r\n${}\r\n{}\r\n", msg.len(), msg)
             }
-            // RedisCommand::Set { .. } => {}
+            RedisCommand::Set { key, value, .. } => {
+                write!(
+                    f,
+                    "*3\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                    key.len(),
+                    key,
+                    value.len(),
+                    value
+                )
+            }
             // RedisCommand::Get { .. } => {}
             // RedisCommand::Config { .. } => {}
             // RedisCommand::Keys { .. } => {}

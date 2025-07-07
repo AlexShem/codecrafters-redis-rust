@@ -2,6 +2,7 @@ use crate::commands::{
     CommandContext, ConfigCommand, ExecutionContext, InfoCommand, RedisCommand, RedisResponse,
     ReplConfArgs,
 };
+use crate::propagation::PropagationManager;
 use crate::rdb::RdbParser;
 use crate::rdb_handler::RdbHandler;
 use crate::replication_master::ReplicationMaster;
@@ -42,6 +43,7 @@ pub struct Server {
     /// Current replication state of the server
     pub replication_state: ReplicationState,
     pub _replication_master: Option<ReplicationMaster>,
+    pub _propagation_manager: PropagationManager,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +124,7 @@ impl Server {
             config,
             replication_state,
             _replication_master: replication_master,
+            _propagation_manager: PropagationManager::new(),
         }
     }
 

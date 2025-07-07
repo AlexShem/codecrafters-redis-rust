@@ -1,4 +1,5 @@
 mod commands;
+mod propagation;
 mod rdb;
 mod rdb_handler;
 mod replication;
@@ -7,6 +8,7 @@ mod resp;
 mod server;
 
 use crate::commands::{CommandContext, ExecutionContext, RedisCommand, RedisResponse};
+use crate::propagation::PropagationManager;
 use crate::replication::initiate_replication_handshake;
 use crate::server::{ReplicationState, Server, ServerConfig, ServerRole};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,6 +18,7 @@ use tokio::net::TcpListener;
 async fn main() -> anyhow::Result<()> {
     let config = parse_args();
     let replication_state = ReplicationState::new(&config);
+    let propagation_manager = PropagationManager::new();
 
     if let ServerRole::Replica(_) = replication_state.role {
         let replication_state_clone = replication_state.clone();
@@ -35,7 +38,8 @@ async fn main() -> anyhow::Result<()> {
             Ok((stream, _)) => {
                 println!("accepted new connection");
                 let server = Server::new(stream, config.clone(), replication_state.clone());
-                tokio::spawn(async move { handle_connection(server).await });
+                let prop_manager = propagation_manager.clone();
+                tokio::spawn(async move { handle_connection(server, prop_manager).await });
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -126,7 +130,7 @@ fn parse_args() -> ServerConfig {
     }
 }
 
-async fn handle_connection(mut server: Server) {
+async fn handle_connection(mut server: Server, propagation_manager: PropagationManager) {
     loop {
         let mut buf = bytes::BytesMut::with_capacity(512);
         match server.reader.read_buf(&mut buf).await {
@@ -139,6 +143,7 @@ async fn handle_connection(mut server: Server) {
 
                 match server.parse_command(command_raw) {
                     Ok(command) => {
+                        // Handle replication commands
                         if matches!(command, RedisCommand::Psync { .. })
                             && matches!(server.replication_state.role, ServerRole::Master(_))
                         {
@@ -155,7 +160,7 @@ async fn handle_connection(mut server: Server) {
                                 .unwrap();
                             server.writer.flush().await.unwrap();
 
-                            // Then send RDB file using the response system
+                            // Then send RDB file
                             let rdb_response = server.get_rdb_file_response();
                             server
                                 .writer
@@ -163,22 +168,35 @@ async fn handle_connection(mut server: Server) {
                                 .await
                                 .unwrap();
                             server.writer.flush().await.unwrap();
+
+                            // Move writer to propagation manager and keep reader for replica loop
+                            propagation_manager.add_replica(server.writer).await;
+                            let mut reader = server.reader;
+
+                            // Replica loop - only read, don't write responses
+                            loop {
+                                let mut buf = bytes::BytesMut::with_capacity(512);
+                                match reader.read_buf(&mut buf).await {
+                                    Ok(0) => break,
+                                    Ok(_) => {
+                                        // Replica receives propagated commands but doesn't respond
+                                        // Just consume the data to keep connection alive
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            break;
                         } else {
-                            // Handle normal commands
-                            let response = match &server.replication_state.role {
-                                ServerRole::Master(_master_state) => {
-                                    server.execute_command(CommandContext {
-                                        command,
-                                        context: ExecutionContext::Client,
-                                    })
-                                }
-                                ServerRole::Replica(_replica_state) => {
-                                    server.execute_command(CommandContext {
-                                        command,
-                                        context: ExecutionContext::Replication,
-                                    })
-                                }
-                            };
+                            // Handle normal client commands
+                            let response = server.execute_command(CommandContext {
+                                command: command.clone(),
+                                context: ExecutionContext::Client,
+                            });
+
+                            // Propagate write commands to replicas if this is a master
+                            if matches!(server.replication_state.role, ServerRole::Master(_)) {
+                                propagation_manager.propagate_command(&command).await;
+                            }
 
                             server
                                 .writer
