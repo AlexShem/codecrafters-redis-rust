@@ -1,6 +1,8 @@
 use crate::commands::ReplConfArgs::{Capa, ListeningPort};
-use crate::commands::{RedisCommand, RedisResponse};
-use crate::server::{ReplicationState, ServerRole};
+use crate::commands::{
+    RedisCommand, RedisResponse, extract_complete_command, parse_propagated_command,
+};
+use crate::server::{ReplicationState, ServerRole, SharedStorage, StorageValue};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -19,7 +21,11 @@ impl ReplicationHandshake {
         Ok(ReplicationHandshake { stream })
     }
 
-    pub async fn execute_handshake(&mut self, replica_port: &str) -> Result<(), String> {
+    pub async fn execute_handshake(
+        &mut self,
+        replica_port: &str,
+        storage: SharedStorage,
+    ) -> Result<(), String> {
         // Send PING
         self.send_and_validate(RedisCommand::Ping).await?;
         // Send REPLCONF listening-port <REPLICA PORT>
@@ -39,8 +45,56 @@ impl ReplicationHandshake {
         })
         .await?;
 
-        println!("✔️ Replication handshake completed successfully");
+        self.process_propagated_commands(storage).await?;
+
         Ok(())
+    }
+
+    async fn process_propagated_commands(&mut self, storage: SharedStorage) -> Result<(), String> {
+        let mut buffer = Vec::new();
+
+        loop {
+            let mut temp_buf = [0; 1024];
+            match self.stream.read(&mut temp_buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    buffer.extend_from_slice(&temp_buf[..n]);
+
+                    while let Some((command_str, remaining)) = extract_complete_command(&buffer) {
+                        if let Ok(command) = parse_propagated_command(&command_str) {
+                            self.process_replica_command(command, storage.clone()).await;
+                        }
+                        buffer = remaining;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error reading from master: {}", e);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn process_replica_command(&self, command: RedisCommand, storage: SharedStorage) {
+        // Create a minimal server-like processor that uses the shared storage
+        Self::execute_command_with_storage(command, storage).await;
+    }
+
+    async fn execute_command_with_storage(command: RedisCommand, storage: SharedStorage) {
+        match command {
+            RedisCommand::Set {
+                key,
+                value,
+                expiry_ms,
+            } => {
+                let storage_value = StorageValue::new(value, expiry_ms);
+                let mut storage = storage.lock().await;
+                storage.insert(key, storage_value);
+            }
+            // Add other write commands as needed
+            _ => {} // Ignore read-only commands for replicas
+        }
     }
 
     async fn send_and_validate(&mut self, cmd: RedisCommand) -> Result<(), String> {
@@ -64,25 +118,40 @@ impl ReplicationHandshake {
 
         // Validate response
         let response = RedisResponse::from_raw(&raw_response);
-        let expected = RedisResponse::expected_for_command(&cmd);
 
-        if response == expected {
-            println!("✔️ {:?} successful", cmd);
-            Ok(())
+        // Special validation for PSYNC
+        if matches!(cmd, RedisCommand::Psync { .. }) {
+            match response {
+                RedisResponse::FullResync { .. } => {
+                    println!("✔️ {:?} successful", cmd);
+                    Ok(())
+                }
+                _ => Err(format!("Expected FULLRESYNC response, got {:?}", response)),
+            }
         } else {
-            Err(format!("Expected {:?}, got {:?}", expected, response))
+            // Standard validation for other commands
+            let expected = RedisResponse::expected_for_command(&cmd);
+            if response == expected {
+                println!("✔️ {:?} successful", cmd);
+                Ok(())
+            } else {
+                Err(format!("Expected {:?}, got {:?}", expected, response))
+            }
         }
     }
 }
 
-pub async fn initiate_replication_handshake(replication_state: ReplicationState) {
+pub async fn initiate_replication_handshake(
+    replication_state: ReplicationState,
+    storage: SharedStorage,
+) {
     if let ServerRole::Replica(replica_state) = replication_state.role {
         match ReplicationHandshake::connect(&replica_state.master_host, &replica_state.master_port)
             .await
         {
             Ok(mut handshake) => {
                 match handshake
-                    .execute_handshake(&replica_state.replica_port)
+                    .execute_handshake(&replica_state.replica_port, storage)
                     .await
                 {
                     Ok(_) => println!("✔️ Replication handshake completed successfully"),

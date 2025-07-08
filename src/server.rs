@@ -2,19 +2,18 @@ use crate::commands::{
     CommandContext, ConfigCommand, ExecutionContext, InfoCommand, RedisCommand, RedisResponse,
     ReplConfArgs,
 };
-use crate::propagation::PropagationManager;
-use crate::rdb::RdbParser;
 use crate::rdb_handler::RdbHandler;
-use crate::replication_master::ReplicationMaster;
 use crate::resp;
 use crate::resp::RespValue;
 use anyhow::anyhow;
 use resp::RespParser;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -28,6 +27,45 @@ pub enum ServerRole {
     Replica(ReplicaState),
 }
 
+#[derive(Debug, Clone)]
+pub struct StorageValue {
+    pub value: String,
+    pub expiry_ms: Option<u128>,
+}
+
+impl StorageValue {
+    pub fn new(value: String, expiry_ms: Option<u128>) -> Self {
+        let expiry_time = match expiry_ms {
+            None => None,
+            Some(ms) => Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+                    + ms,
+            ),
+        };
+        StorageValue {
+            value,
+            expiry_ms: expiry_time,
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        if let Some(expiry) = self.expiry_ms {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            now > expiry
+        } else {
+            false
+        }
+    }
+}
+
+pub type SharedStorage = Arc<Mutex<HashMap<String, StorageValue>>>;
+
 /// Main server structure that handles client connections and commands
 pub struct Server {
     /// Reader for incoming client data
@@ -35,15 +73,11 @@ pub struct Server {
     /// Writer for outgoing server responses
     pub writer: BufWriter<OwnedWriteHalf>,
     /// In-memory key-value storage
-    pub storage: HashMap<String, String>,
-    /// Maps keys to their expiration times in milliseconds
-    pub expiry_times: HashMap<String, u128>,
+    pub storage: SharedStorage,
     /// Server configuration parameters
     pub config: ServerConfig,
     /// Current replication state of the server
     pub replication_state: ReplicationState,
-    pub _replication_master: Option<ReplicationMaster>,
-    pub _propagation_manager: PropagationManager,
 }
 
 #[derive(Debug, Clone)]
@@ -97,49 +131,16 @@ impl Server {
         stream: TcpStream,
         config: ServerConfig,
         replication_state: ReplicationState,
+        storage: SharedStorage,
     ) -> Self {
-        let (read, write) = stream.into_split();
-        let reader = BufReader::new(read);
-        let writer = BufWriter::new(write);
-
-        // Load RDB data if file exists
-        let mut storage = HashMap::new();
-        let mut expiry_times = HashMap::new();
-
-        if let Ok(rdb_data) = RdbParser::parse_file(&config.dir, &config.dbfilename) {
-            storage = rdb_data.keys;
-            expiry_times = rdb_data.expiry_times;
-        }
-
-        let replication_master = match &replication_state.role {
-            ServerRole::Master(_) => Some(ReplicationMaster::new(replication_state.clone())),
-            ServerRole::Replica(_) => None,
-        };
+        let (reader, writer) = stream.into_split();
 
         Server {
-            reader,
-            writer,
+            reader: BufReader::new(reader),
+            writer: BufWriter::new(writer),
             storage,
-            expiry_times,
             config,
             replication_state,
-            _replication_master: replication_master,
-            _propagation_manager: PropagationManager::new(),
-        }
-    }
-
-    fn current_time_ms() -> u128 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    }
-
-    fn is_expired(&self, key: &str) -> bool {
-        if let Some(&expiry_time) = self.expiry_times.get(key) {
-            Self::current_time_ms() >= expiry_time
-        } else {
-            false
         }
     }
 
@@ -363,14 +364,92 @@ impl Server {
         }
     }
 
-    pub fn execute_command(&mut self, command_ctx: CommandContext) -> RedisResponse {
-        match (&command_ctx.command, &command_ctx.context) {
-            (RedisCommand::Ping, ExecutionContext::Client) => RedisResponse::Pong,
-            (RedisCommand::Ping, ExecutionContext::Replication) => RedisResponse::Pong,
-            (RedisCommand::ReplConf { args: _args }, ExecutionContext::Replication) => {
+    pub async fn execute_command(&mut self, context: CommandContext) -> RedisResponse {
+        match context.context {
+            ExecutionContext::Propagation => {
+                // Process silently without sending response back
+                self.process_command_with_storage(context.command).await;
+                // Return a dummy response that won't be sent
                 RedisResponse::Ok
             }
-            (RedisCommand::Psync { repl_id, offset }, ExecutionContext::Replication) => {
+            _ => {
+                // Normal processing for Client and Replication contexts
+                self.process_command_with_storage(context.command).await
+            }
+        }
+    }
+
+    pub async fn process_command_with_storage(&mut self, command: RedisCommand) -> RedisResponse {
+        match command {
+            RedisCommand::Ping => RedisResponse::Pong,
+            RedisCommand::Echo(msg) => RedisResponse::BulkString(Some(msg)),
+            RedisCommand::Set {
+                key,
+                value,
+                expiry_ms,
+            } => {
+                let storage_value = StorageValue::new(value, expiry_ms);
+                let mut storage = self.storage.lock().await;
+                storage.insert(key, storage_value);
+                RedisResponse::Ok
+            }
+            RedisCommand::Get { key } => {
+                let mut storage = self.storage.lock().await;
+                match storage.get(&key) {
+                    Some(storage_value) if !storage_value.is_expired() => {
+                        RedisResponse::BulkString(Some(storage_value.value.clone()))
+                    }
+                    Some(_) => {
+                        // Remove expired key
+                        storage.remove(&key);
+                        RedisResponse::BulkString(None)
+                    }
+                    None => RedisResponse::BulkString(None),
+                }
+            }
+            RedisCommand::Config { subcommand } => match subcommand {
+                ConfigCommand::Get { parameter } => match parameter.as_str() {
+                    "dir" => RedisResponse::Array(vec!["dir".to_string(), self.config.dir.clone()]),
+                    "dbfilename" => RedisResponse::Array(vec![
+                        "dbfilename".to_string(),
+                        self.config.dbfilename.clone(),
+                    ]),
+                    _ => RedisResponse::Array(vec![]),
+                },
+            },
+            RedisCommand::Keys { pattern } => {
+                if pattern == "*" {
+                    let storage = self.storage.lock().await;
+                    let keys: Vec<String> = storage
+                        .iter()
+                        .filter(|(_, storage_value)| !storage_value.is_expired())
+                        .map(|(key, _)| key.clone())
+                        .collect();
+                    RedisResponse::Array(keys)
+                } else {
+                    RedisResponse::Array(vec![])
+                }
+            }
+            RedisCommand::Info { subcommand } => match subcommand {
+                Some(InfoCommand::Replication) => match &self.replication_state.role {
+                    ServerRole::Master(master_state) => {
+                        let info = format!(
+                            "role:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
+                            master_state.replid, master_state.repl_offset
+                        );
+                        RedisResponse::BulkString(Some(info))
+                    }
+                    ServerRole::Replica(_) => {
+                        RedisResponse::BulkString(Some("role:slave".to_string()))
+                    }
+                },
+                _ => RedisResponse::BulkString(Some("".to_string())),
+            },
+            RedisCommand::ReplConf { args } => match args {
+                ReplConfArgs::ListeningPort(_) => RedisResponse::Ok,
+                ReplConfArgs::Capa(_) => RedisResponse::Ok,
+            },
+            RedisCommand::Psync { repl_id, offset } => {
                 if let ServerRole::Master(master_state) = &self.replication_state.role {
                     // Validate PSYNC parameters
                     if repl_id != "?" || offset != "-1" {
@@ -383,147 +462,6 @@ impl Server {
                     }
                 } else {
                     RedisResponse::Error("PSYNC not allowed for replica".to_string())
-                }
-            }
-            // Handle other commands with Client context
-            _ => self.execute_redis_command(&command_ctx.command),
-        }
-    }
-
-    pub fn execute_redis_command(&mut self, command: &RedisCommand) -> RedisResponse {
-        match command {
-            RedisCommand::Ping => RedisResponse::Pong,
-            RedisCommand::Echo(msg) => RedisResponse::BulkString(Some(msg.clone())),
-            RedisCommand::Set {
-                key,
-                value,
-                expiry_ms,
-            } => {
-                self.storage.insert(key.clone(), value.clone());
-                if let Some(expiry_ms) = expiry_ms {
-                    let expiry_time = Self::current_time_ms() + expiry_ms;
-                    self.expiry_times.insert(key.clone(), expiry_time);
-                }
-                RedisResponse::Ok
-            }
-            RedisCommand::Get { key } => {
-                if self.storage.contains_key(key) && !self.is_expired(key) {
-                    let value = self.storage.get(key).unwrap();
-                    RedisResponse::BulkString(Some(value.clone()))
-                } else {
-                    if self.is_expired(&key) {
-                        self.storage.remove(key);
-                        self.expiry_times.remove(key);
-                    }
-                    RedisResponse::BulkString(None)
-                }
-            }
-            RedisCommand::Config { subcommand } => match subcommand {
-                ConfigCommand::Get { parameter } => match parameter.as_str() {
-                    "dir" => {
-                        let elements = vec!["dir".to_string(), self.config.dir.clone()];
-                        RedisResponse::Array(elements)
-                    }
-                    "dbfilename" => {
-                        let elements =
-                            vec!["dbfilename".to_string(), self.config.dbfilename.clone()];
-                        RedisResponse::Array(elements)
-                    }
-                    _ => RedisResponse::Error(format!("unknown parameter: {}", parameter)),
-                },
-            },
-            RedisCommand::Keys { pattern } => {
-                if pattern == "*" {
-                    // Get all non-expired keys
-                    let mut keys: Vec<String> = self
-                        .storage
-                        .keys()
-                        .filter(|&key| !self.is_expired(key))
-                        .cloned()
-                        .collect();
-
-                    // Clean up expired keys
-                    for key in &keys {
-                        if self.is_expired(key) {
-                            self.storage.remove(key);
-                            self.expiry_times.remove(key);
-                        }
-                    }
-
-                    // Filter out expired keys
-                    keys.retain(|key| !self.is_expired(key));
-
-                    RedisResponse::Array(keys)
-                } else {
-                    // For now, only support "*" pattern
-                    RedisResponse::Error(format!("KEYS pattern not supported: {}", pattern))
-                }
-            }
-            RedisCommand::Info { subcommand } => {
-                match subcommand {
-                    Some(InfoCommand::Replication) | None => {
-                        let mut response = String::new();
-
-                        match &self.replication_state.role {
-                            ServerRole::Master(master_state) => {
-                                response.push_str(&"role:master\r\n".to_string());
-                                response.push_str(&format!(
-                                    "master_replid:{}\r\n",
-                                    master_state.replid
-                                ));
-                                response.push_str(&format!(
-                                    "master_repl_offset:{}\r\n",
-                                    master_state.repl_offset
-                                ));
-                            }
-                            ServerRole::Replica { .. } => {
-                                response.push_str("role:slave\r\n");
-                                // For replicas, you might show master's replid/offset differently
-                            }
-                        }
-
-                        // Remove the trailing \r\n
-                        response.pop();
-                        response.pop();
-
-                        RedisResponse::BulkString(Some(response))
-                    }
-                    _ => RedisResponse::Error(format!(
-                        "Unsupported INFO subcommand: {:?}",
-                        subcommand.as_ref()
-                    )),
-                }
-            }
-            RedisCommand::ReplConf { args: argument } => match argument {
-                ReplConfArgs::ListeningPort(_port) => RedisResponse::Ok,
-                ReplConfArgs::Capa(_capa) => RedisResponse::Ok,
-            },
-            RedisCommand::Psync { repl_id, offset } => {
-                if repl_id.as_str() != "?" {
-                    return RedisResponse::Error(format!(
-                        "Unsupported argument for REPL_ID: {}",
-                        repl_id
-                    ));
-                }
-
-                if offset.as_str() != "-1" {
-                    return RedisResponse::Error(format!(
-                        "Unsupported argument for replication offset: {}",
-                        offset
-                    ));
-                }
-
-                if let ServerRole::Master(master_state) = &self.replication_state.role {
-                    let id = &master_state.replid;
-                    let offset = master_state.repl_offset;
-                    RedisResponse::FullResync {
-                        repl_id: id.to_owned(),
-                        offset,
-                    }
-                } else {
-                    RedisResponse::Error(
-                        "PSINC call is not allowed for the replica server".to_string(),
-                    )
                 }
             }
         }

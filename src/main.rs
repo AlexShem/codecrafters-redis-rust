@@ -3,27 +3,48 @@ mod propagation;
 mod rdb;
 mod rdb_handler;
 mod replication;
-mod replication_master;
 mod resp;
 mod server;
 
 use crate::commands::{CommandContext, ExecutionContext, RedisCommand, RedisResponse};
 use crate::propagation::PropagationManager;
+use crate::rdb_handler::RdbHandler;
 use crate::replication::initiate_replication_handshake;
-use crate::server::{ReplicationState, Server, ServerConfig, ServerRole};
+use crate::server::{
+    ReplicationState, Server, ServerConfig, ServerRole, SharedStorage, StorageValue,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = parse_args();
     let replication_state = ReplicationState::new(&config);
     let propagation_manager = PropagationManager::new();
+    let storage: SharedStorage = Arc::new(Mutex::new(HashMap::new()));
+
+    // Load RDB file if it exists
+    if !config.dir.is_empty() && !config.dbfilename.is_empty() {
+        let rdb_path = format!("{}/{}", config.dir, config.dbfilename);
+        if std::path::Path::new(&rdb_path).exists() {
+            if let Ok(rdb_data) = RdbHandler::load_rdb_file(&rdb_path).await {
+                let mut storage_lock = storage.lock().await;
+                for (key, value, expiry) in rdb_data {
+                    storage_lock.insert(key, StorageValue::new(value, expiry));
+                }
+                println!("Loaded RDB file: {}", rdb_path);
+            }
+        }
+    }
 
     if let ServerRole::Replica(_) = replication_state.role {
         let replication_state_clone = replication_state.clone();
+        let storage_clone = storage.clone();
         tokio::spawn(async move {
-            initiate_replication_handshake(replication_state_clone).await;
+            initiate_replication_handshake(replication_state_clone, storage_clone).await;
         });
     }
 
@@ -37,7 +58,12 @@ async fn main() -> anyhow::Result<()> {
         match listener.accept().await {
             Ok((stream, _)) => {
                 println!("accepted new connection");
-                let server = Server::new(stream, config.clone(), replication_state.clone());
+                let server = Server::new(
+                    stream,
+                    config.clone(),
+                    replication_state.clone(),
+                    storage.clone(),
+                );
                 let prop_manager = propagation_manager.clone();
                 tokio::spawn(async move { handle_connection(server, prop_manager).await });
             }
@@ -148,10 +174,12 @@ async fn handle_connection(mut server: Server, propagation_manager: PropagationM
                             && matches!(server.replication_state.role, ServerRole::Master(_))
                         {
                             // Send FULLRESYNC response first
-                            let fullresync_response = server.execute_command(CommandContext {
-                                command,
-                                context: ExecutionContext::Replication,
-                            });
+                            let fullresync_response = server
+                                .execute_command(CommandContext {
+                                    command,
+                                    context: ExecutionContext::Replication,
+                                })
+                                .await;
 
                             server
                                 .writer
@@ -188,10 +216,12 @@ async fn handle_connection(mut server: Server, propagation_manager: PropagationM
                             break;
                         } else {
                             // Handle normal client commands
-                            let response = server.execute_command(CommandContext {
-                                command: command.clone(),
-                                context: ExecutionContext::Client,
-                            });
+                            let response = server
+                                .execute_command(CommandContext {
+                                    command: command.clone(),
+                                    context: ExecutionContext::Client,
+                                })
+                                .await;
 
                             // Propagate write commands to replicas if this is a master
                             if matches!(server.replication_state.role, ServerRole::Master(_)) {
