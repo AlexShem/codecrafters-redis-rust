@@ -32,18 +32,18 @@ impl ReplicationHandshake {
         self.send_and_validate(RedisCommand::ReplConf {
             args: ListeningPort(replica_port.to_string()),
         })
-        .await?;
+            .await?;
         // Send REPLCONF capa psync2
         self.send_and_validate(RedisCommand::ReplConf {
             args: Capa("psync2".to_string()),
         })
-        .await?;
+            .await?;
         // Send PSYNC replicationid offset
         self.send_and_validate(RedisCommand::Psync {
             repl_id: "?".to_string(),
             offset: "-1".to_string(),
         })
-        .await?;
+            .await?;
 
         self.process_propagated_commands(storage).await?;
 
@@ -61,8 +61,12 @@ impl ReplicationHandshake {
                     buffer.extend_from_slice(&temp_buf[..n]);
 
                     while let Some((command_str, remaining)) = extract_complete_command(&buffer) {
+                        println!("Processing propagated command: {}", command_str.trim()); // Debug log
                         if let Ok(command) = parse_propagated_command(&command_str) {
+                            println!("Parsed command: {:?}", command); // Debug log
                             self.process_replica_command(command, storage.clone()).await;
+                        } else {
+                            println!("Failed to parse command: {}", command_str); // Debug log
                         }
                         buffer = remaining;
                     }
