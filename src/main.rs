@@ -1,6 +1,4 @@
-#![allow(unused_imports)]
-
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
 fn main() {
@@ -8,9 +6,9 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(_stream) => {
+            Ok(stream) => {
                 println!("accepted new connection");
-                handle_connection(_stream).expect("Failed to handle the connection");
+                handle_connection(stream);
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -19,8 +17,24 @@ fn main() {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
-    let response = bytes::Bytes::from("+PONG\r\n");
-    stream.write_all(&response)?;
-    Ok(())
+fn handle_connection(mut stream: TcpStream) {
+    loop {
+        let mut buf = [0; 512];
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                println!("Connection closed by client");
+                break;
+            }
+            Ok(bytes_read) => {
+                let command = String::from_utf8_lossy(&buf[..bytes_read]);
+                println!("Bytes read: {}", bytes_read);
+                println!("Command: {:?}", command);
+                stream.write_all(b"+PONG\r\n").unwrap();
+            }
+            Err(e) => {
+                println!("Failed to read from connection: {}", e);
+                break;
+            }
+        }
+    }
 }
