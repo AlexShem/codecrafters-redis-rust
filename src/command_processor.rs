@@ -18,6 +18,14 @@ impl CommandProcessor {
                 self.storage.set(key, value).await;
                 CommandResult::Ok
             }
+            RedisCommand::SetWithExpiry {
+                key,
+                value,
+                expiry_ms,
+            } => {
+                self.storage.set_with_expiry(key, value, expiry_ms).await;
+                CommandResult::Ok
+            }
             RedisCommand::Get { key } => {
                 let value = self.storage.get(&key).await;
                 CommandResult::Value(value)

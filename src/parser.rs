@@ -44,14 +44,34 @@ impl Parser {
                         Ok(RedisCommand::Echo(message))
                     }
                     "SET" => {
-                        if elements.len() != 3 {
+                        if elements.len() < 3 {
                             return Err(anyhow!("SET command requires exactly two arguments"));
                         }
 
                         let key = self.extract_string(&elements[1])?;
                         let value = self.extract_string(&elements[2])?;
 
-                        Ok(RedisCommand::Set { key, value })
+                        if elements.len() == 5 {
+                            let px_arg = self.extract_string(&elements[3])?.to_uppercase();
+                            if px_arg == "PX" {
+                                let expiry_str = self.extract_string(&elements[4])?;
+                                let expiry_ms = expiry_str
+                                    .parse::<u64>()
+                                    .map_err(|_| anyhow!("Invalid expiry time: {}", expiry_str))?;
+
+                                Ok(RedisCommand::SetWithExpiry {
+                                    key,
+                                    value,
+                                    expiry_ms,
+                                })
+                            } else {
+                                Err(anyhow!("Unsupported SET argument: {}", px_arg))
+                            }
+                        } else if elements.len() == 3 {
+                            Ok(RedisCommand::Set { key, value })
+                        } else {
+                            Err(anyhow!("Invalid number of arguments for SET command"))
+                        }
                     }
                     "GET" => {
                         if elements.len() != 2 {

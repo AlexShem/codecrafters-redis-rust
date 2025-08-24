@@ -2,8 +2,18 @@
 pub enum RedisCommand {
     Ping,
     Echo(String),
-    Set { key: String, value: String },
-    Get { key: String },
+    Set {
+        key: String,
+        value: String,
+    },
+    SetWithExpiry {
+        key: String,
+        value: String,
+        expiry_ms: u64,
+    },
+    Get {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
