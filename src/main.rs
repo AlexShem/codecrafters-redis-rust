@@ -1,3 +1,11 @@
+mod parser;
+mod redis_command;
+mod redis_response;
+mod types;
+
+use crate::parser::Parser;
+use crate::redis_command::RedisCommand;
+use crate::redis_response::RedisResponse;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -10,15 +18,6 @@ async fn main() {
         tokio::spawn(async move {
             handle_connection(stream).await;
         });
-        // match stream {
-        //     Ok(stream) => {
-        //         println!("accepted new connection");
-        //         handle_connection(stream);
-        //     }
-        //     Err(e) => {
-        //         println!("error: {}", e);
-        //     }
-        // }
     }
 }
 
@@ -31,10 +30,17 @@ async fn handle_connection(mut stream: TcpStream) {
                 break;
             }
             Ok(bytes_read) => {
-                let command = String::from_utf8_lossy(&buf[..bytes_read]);
-                println!("Bytes read: {}", bytes_read);
-                println!("Command: {:?}", command);
-                stream.write_all(b"+PONG\r\n").await.unwrap();
+                let command_bytes = bytes::Bytes::copy_from_slice(&buf[..bytes_read]);
+                let parser = Parser::new();
+                let command: RedisCommand = match parser.parse_command(command_bytes) {
+                    Ok(cmd) => cmd,
+                    Err(e) => {
+                        eprintln!("Parse error: {}", e);
+                        continue;
+                    }
+                };
+                let response = RedisResponse::command_response(command);
+                stream.write_all(response.to_bytes()).await.unwrap();
             }
             Err(e) => {
                 println!("Failed to read from connection: {}", e);
