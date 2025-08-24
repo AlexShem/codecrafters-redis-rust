@@ -43,10 +43,38 @@ impl Parser {
 
                         Ok(RedisCommand::Echo(message))
                     }
+                    "SET" => {
+                        if elements.len() != 3 {
+                            return Err(anyhow!("SET command requires exactly two arguments"));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        let value = self.extract_string(&elements[2])?;
+
+                        Ok(RedisCommand::Set { key, value })
+                    }
+                    "GET" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("GET command requires exactly one argument"));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        Ok(RedisCommand::Get { key })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }
             _ => Err(anyhow!("Commands must be arrays")),
+        }
+    }
+
+    fn extract_string(&self, value: &Value) -> anyhow::Result<String> {
+        match value {
+            Value::SimpleString(bytes) => String::from_utf8(bytes.clone())
+                .map_err(|e| anyhow!("Invalid UTF-8 in string: {}", e)),
+            Value::BulkString(bytes) => String::from_utf8(bytes.clone())
+                .map_err(|e| anyhow!("Invalid UTF-8 in string: {}", e)),
+            _ => Err(anyhow!("Expected string value")),
         }
     }
 }

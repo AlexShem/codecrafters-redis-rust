@@ -1,15 +1,23 @@
-use crate::redis_command::RedisCommand;
+use crate::redis_command::{CommandResult};
 
 pub struct RedisResponse {
     data: Vec<u8>,
 }
 
 impl RedisResponse {
-    pub fn command_response(command: RedisCommand) -> Self {
-        let data = match command {
-            RedisCommand::Ping => b"+PONG\r\n".to_vec(),
-            RedisCommand::Echo(message) => {
+    pub fn from_result(result: CommandResult) -> Self {
+        let data = match result {
+            CommandResult::Pong => b"+PONG\r\n".to_vec(),
+            CommandResult::Echo(message) => {
                 format!("${}\r\n{}\r\n", message.len(), message).into_bytes()
+            }
+            CommandResult::Ok => b"+OK\r\n".to_vec(),
+            CommandResult::Value(value) => {
+                if let Some(val) = value {
+                    format!("${}\r\n{}\r\n", val.len(), val).into_bytes()
+                } else {
+                    b"$-1\r\n".to_vec()
+                }
             }
         };
         Self { data }
