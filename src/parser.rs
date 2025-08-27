@@ -89,6 +89,9 @@ impl Parser {
                         let key = self.extract_string(&elements[1])?;
                         Ok(RedisCommand::Incr(key))
                     }
+                    "MULTI" => {
+                        Ok(RedisCommand::Multi)
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

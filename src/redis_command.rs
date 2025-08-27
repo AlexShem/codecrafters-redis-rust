@@ -15,6 +15,7 @@ pub enum RedisCommand {
         key: String,
     },
     Incr(String),
+    Multi,
 }
 
 #[derive(Debug, Clone)]

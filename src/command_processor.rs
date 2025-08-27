@@ -48,6 +48,9 @@ impl CommandProcessor {
                 self.storage.set(key, new_value.to_string()).await;
                 CommandResult::Integer(new_value)
             }
+            RedisCommand::Multi => {
+                CommandResult::Ok
+            }
         }
     }
 }
