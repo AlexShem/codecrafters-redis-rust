@@ -30,6 +30,19 @@ impl CommandProcessor {
                 let value = self.storage.get(&key).await;
                 CommandResult::Value(value)
             }
+            RedisCommand::Incr(key) => {
+                let new_value = match self.storage.get(&key).await {
+                    None => 1,
+                    Some(value_str) => {
+                        value_str
+                            .parse::<i64>()
+                            .expect("Failed to parse the stored integer")
+                            + 1
+                    }
+                };
+                self.storage.set(key, new_value.to_string()).await;
+                CommandResult::Integer(new_value)
+            }
         }
     }
 }

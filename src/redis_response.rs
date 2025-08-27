@@ -19,6 +19,9 @@ impl RedisResponse {
                     b"$-1\r\n".to_vec()
                 }
             }
+            CommandResult::Integer(number) => {
+                format!(":{}\r\n", number.to_string()).into_bytes()
+            }
         };
         Self { data }
     }

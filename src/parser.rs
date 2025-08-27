@@ -81,6 +81,14 @@ impl Parser {
                         let key = self.extract_string(&elements[1])?;
                         Ok(RedisCommand::Get { key })
                     }
+                    "INCR" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("INCR command requires exactly one argument"));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        Ok(RedisCommand::Incr(key))
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

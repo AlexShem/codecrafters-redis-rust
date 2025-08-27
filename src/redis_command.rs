@@ -14,6 +14,7 @@ pub enum RedisCommand {
     Get {
         key: String,
     },
+    Incr(String),
 }
 
 #[derive(Debug, Clone)]
@@ -22,4 +23,5 @@ pub enum CommandResult {
     Echo(String),
     Ok,
     Value(Option<String>),
+    Integer(i64),
 }

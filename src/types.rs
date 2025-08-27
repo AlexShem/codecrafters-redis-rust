@@ -6,6 +6,8 @@ pub enum Value {
     SimpleString(Vec<u8>),
     BulkString(Vec<u8>),
     Array(Vec<Value>),
+    #[allow(unused)]
+    Integer(i64),
 }
 
 pub fn parse_value(buf: &mut Bytes) -> anyhow::Result<Value> {
@@ -18,8 +20,27 @@ pub fn parse_value(buf: &mut Bytes) -> anyhow::Result<Value> {
         b'+' => parse_simple_string(buf),
         b'$' => parse_bulk_string(buf),
         b'*' => parse_array(buf),
+        b':' => parse_integer(buf),
         _ => Err(anyhow!("Unsupported data type: {}", first_byte as char)),
     }
+}
+
+fn parse_integer(buf: &mut Bytes) -> anyhow::Result<Value> {
+    let line = read_until_crlf(buf)?;
+    let sign = match line.first() {
+        None => None,
+        Some(byte) => match byte {
+            b'+' => Some(1_i64),
+            b'-' => Some(-1_i64),
+            _ => None
+        }
+    };
+    let number = match sign {
+        None => String::from_utf8(line)?.parse::<i64>()?,
+        Some(multiple) => String::from_utf8(line[1..].to_vec())?.parse::<i64>()? * multiple,
+    };
+
+    Ok(Value::Integer(number))
 }
 
 fn parse_array(buf: &mut Bytes) -> anyhow::Result<Value> {
