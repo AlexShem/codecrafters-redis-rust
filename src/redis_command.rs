@@ -24,4 +24,5 @@ pub enum CommandResult {
     Ok,
     Value(Option<String>),
     Integer(i64),
+    RedisError(String),
 }

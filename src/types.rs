@@ -32,8 +32,8 @@ fn parse_integer(buf: &mut Bytes) -> anyhow::Result<Value> {
         Some(byte) => match byte {
             b'+' => Some(1_i64),
             b'-' => Some(-1_i64),
-            _ => None
-        }
+            _ => None,
+        },
     };
     let number = match sign {
         None => String::from_utf8(line)?.parse::<i64>()?,

@@ -34,10 +34,15 @@ impl CommandProcessor {
                 let new_value = match self.storage.get(&key).await {
                     None => 1,
                     Some(value_str) => {
-                        value_str
-                            .parse::<i64>()
-                            .expect("Failed to parse the stored integer")
-                            + 1
+                        if let Ok(value) = value_str.parse::<i64>() {
+                            dbg!(&value);
+                            value + 1
+                        } else {
+                            dbg!(&value_str);
+                            return CommandResult::RedisError(
+                                "value is not an integer or out of range".to_string(),
+                            );
+                        }
                     }
                 };
                 self.storage.set(key, new_value.to_string()).await;

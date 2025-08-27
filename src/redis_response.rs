@@ -1,5 +1,6 @@
-use crate::redis_command::{CommandResult};
+use crate::redis_command::CommandResult;
 
+#[derive(Debug)]
 pub struct RedisResponse {
     data: Vec<u8>,
 }
@@ -19,9 +20,8 @@ impl RedisResponse {
                     b"$-1\r\n".to_vec()
                 }
             }
-            CommandResult::Integer(number) => {
-                format!(":{}\r\n", number.to_string()).into_bytes()
-            }
+            CommandResult::Integer(number) => format!(":{}\r\n", number.to_string()).into_bytes(),
+            CommandResult::RedisError(error) => format!("-ERR {}\r\n", error).into_bytes(),
         };
         Self { data }
     }
