@@ -92,6 +92,9 @@ impl Parser {
                     "MULTI" => {
                         Ok(RedisCommand::Multi)
                     }
+                    "EXEC" => {
+                        Ok(RedisCommand::Exec)
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

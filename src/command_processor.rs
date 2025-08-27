@@ -51,6 +51,9 @@ impl CommandProcessor {
             RedisCommand::Multi => {
                 CommandResult::Ok
             }
+            RedisCommand::Exec => {
+                CommandResult::RedisError("EXEC without MULTI".to_string())
+            }
         }
     }
 }
