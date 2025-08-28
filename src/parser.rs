@@ -95,6 +95,9 @@ impl Parser {
                     "EXEC" => {
                         Ok(RedisCommand::Exec)
                     }
+                    "DISCARD" => {
+                        Ok(RedisCommand::Discard)
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

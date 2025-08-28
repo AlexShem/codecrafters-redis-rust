@@ -45,6 +45,15 @@ impl CommandProcessor {
 
                 CommandResult::Array(results)
             }
+            RedisCommand::Discard => {
+                if !self.tx_state.active {
+                    return CommandResult::RedisError("DISCARD without MULTI".to_string());
+                }
+                
+                self.tx_state.active = false;
+                self.tx_state.queue.clear();
+                CommandResult::Ok
+            }
             other => {
                 if self.tx_state.active {
                     self.tx_state.queue.push(other);
@@ -91,7 +100,7 @@ impl CommandProcessor {
                 self.storage.set(key, new_value.to_string()).await;
                 CommandResult::Integer(new_value)
             }
-            RedisCommand::Multi | RedisCommand::Exec => {
+            RedisCommand::Multi | RedisCommand::Exec | RedisCommand::Discard => {
                 CommandResult::RedisError("Internal command routing error".to_string())
             }
         }

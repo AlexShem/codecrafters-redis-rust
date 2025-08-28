@@ -17,6 +17,7 @@ pub enum RedisCommand {
     Incr(String),
     Multi,
     Exec,
+    Discard,
 }
 
 #[derive(Debug, Clone)]
