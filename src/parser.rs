@@ -89,14 +89,41 @@ impl Parser {
                         let key = self.extract_string(&elements[1])?;
                         Ok(RedisCommand::Incr(key))
                     }
-                    "MULTI" => {
-                        Ok(RedisCommand::Multi)
-                    }
-                    "EXEC" => {
-                        Ok(RedisCommand::Exec)
-                    }
-                    "DISCARD" => {
-                        Ok(RedisCommand::Discard)
+                    "MULTI" => Ok(RedisCommand::Multi),
+                    "EXEC" => Ok(RedisCommand::Exec),
+                    "DISCARD" => Ok(RedisCommand::Discard),
+                    "CONFIG" => {
+                        if elements.len() < 2 {
+                            return Err(anyhow!(
+                                "CONFIG command must be followed by another keyword"
+                            ));
+                        }
+
+                        let command_subname = match &elements[1] {
+                            Value::SimpleString(bytes) => {
+                                String::from_utf8(bytes.clone())?.to_uppercase()
+                            }
+                            Value::BulkString(bytes) => {
+                                String::from_utf8(bytes.clone())?.to_uppercase()
+                            }
+                            _ => return Err(anyhow!("Invalid command format")),
+                        };
+
+                        if command_subname != "GET" {
+                            return Err(anyhow!(
+                                "CONFIG {} command is not supported",
+                                command_subname
+                            ));
+                        }
+
+                        if elements.len() < 3 {
+                            return Err(anyhow!(
+                                "CONFIG GET command requires exactly one argument"
+                            ));
+                        }
+
+                        let argument = self.extract_string(&elements[2])?;
+                        Ok(RedisCommand::ConfigGet(argument))
                     }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }

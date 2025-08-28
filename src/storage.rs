@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -7,6 +8,10 @@ use tokio::time::Instant;
 #[derive(Clone)]
 pub struct Storage {
     data: Arc<RwLock<HashMap<String, StoredValue>>>,
+    #[allow(unused)]
+    file_path: Option<PathBuf>,
+    dir: Option<String>,
+    dbfilename: Option<String>,
 }
 
 struct StoredValue {
@@ -15,9 +20,24 @@ struct StoredValue {
 }
 
 impl Storage {
-    pub fn new() -> Self {
+    pub fn new(
+        file_path: Option<PathBuf>,
+        dir: Option<String>,
+        dbfilename: Option<String>,
+    ) -> Self {
         Self {
             data: Arc::new(RwLock::new(HashMap::new())),
+            file_path,
+            dir,
+            dbfilename,
+        }
+    }
+
+    pub fn get_config(&self, key: &str) -> Option<String> {
+        match key {
+            "dir" => self.dir.clone(),
+            "dbfilename" => self.dbfilename.clone(),
+            _ => None,
         }
     }
 

@@ -18,6 +18,7 @@ pub enum RedisCommand {
     Multi,
     Exec,
     Discard,
+    ConfigGet(String),
 }
 
 #[derive(Debug, Clone)]
@@ -30,4 +31,5 @@ pub enum CommandResult {
     Integer(i64),
     Array(Vec<CommandResult>),
     RedisError(String),
+    ConfigValue(String, String),
 }

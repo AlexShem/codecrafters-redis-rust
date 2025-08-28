@@ -1,22 +1,30 @@
+mod command_processor;
 mod parser;
 mod redis_command;
 mod redis_response;
-mod types;
 mod storage;
-mod command_processor;
+mod types;
 
+use std::path::PathBuf;
+use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;
 use crate::redis_command::RedisCommand;
 use crate::redis_response::RedisResponse;
+use crate::storage::Storage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use crate::command_processor::CommandProcessor;
-use crate::storage::Storage;
 
 #[tokio::main]
 async fn main() {
+    let (dir, dbfilename) = parse_args();
+    let file_path = if let (Some(d), Some(f)) = (&dir, &dbfilename) {
+        Some(PathBuf::from(d).join(f))
+    } else {
+        None
+    };
+
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-    let storage = Storage::new();
+    let storage = Storage::new(file_path, dir, dbfilename);
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
@@ -59,4 +67,37 @@ async fn handle_connection(mut stream: TcpStream, storage: Storage) {
             }
         }
     }
+}
+
+fn parse_args() -> (Option<String>, Option<String>) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut dir = None;
+    let mut dbfilename = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dir" => {
+                if i + 1 < args.len() {
+                    dir = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --dir requries a value");
+                    i += 1;
+                }
+            }
+            "--dbfilename" => {
+                if i + 1 < args.len() {
+                    dbfilename = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --dbfilename requries a value");
+                    i += 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+
+    (dir, dbfilename)
 }

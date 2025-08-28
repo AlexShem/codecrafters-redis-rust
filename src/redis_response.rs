@@ -31,6 +31,19 @@ impl RedisResponse {
                 bytes
             }
             CommandResult::RedisError(error) => format!("-ERR {}\r\n", error).into_bytes(),
+            CommandResult::ConfigValue(key, value) => {
+                let key_bytes = key.as_bytes();
+                let value_bytes = value.as_bytes();
+
+                let response = format!(
+                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                    key_bytes.len(),
+                    key,
+                    value_bytes.len(),
+                    value
+                );
+                response.into_bytes()
+            }
         };
         Self { data }
     }

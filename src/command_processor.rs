@@ -49,7 +49,7 @@ impl CommandProcessor {
                 if !self.tx_state.active {
                     return CommandResult::RedisError("DISCARD without MULTI".to_string());
                 }
-                
+
                 self.tx_state.active = false;
                 self.tx_state.queue.clear();
                 CommandResult::Ok
@@ -103,6 +103,19 @@ impl CommandProcessor {
             RedisCommand::Multi | RedisCommand::Exec | RedisCommand::Discard => {
                 CommandResult::RedisError("Internal command routing error".to_string())
             }
+            RedisCommand::ConfigGet(argument) => match argument.as_str() {
+                "dir" | "dbfilename" => {
+                    if let Some(value) = self.storage.get_config(&argument) {
+                        CommandResult::ConfigValue(argument, value)
+                    } else {
+                        CommandResult::ConfigValue(argument, String::new())
+                    }
+                }
+                arg => CommandResult::RedisError(format!(
+                    "CONFIG GET does not support this argument: {}",
+                    arg
+                )),
+            },
         }
     }
 }
