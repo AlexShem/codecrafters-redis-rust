@@ -38,7 +38,12 @@ impl CommandProcessor {
                     return CommandResult::Array(vec![]);
                 }
 
-                CommandResult::RedisError("EXEC without MULTI".to_string())
+                let mut results = Vec::with_capacity(queued.len());
+                for queued_cmd in queued {
+                    results.push(self.execute_primitive(queued_cmd).await);
+                }
+
+                CommandResult::Array(results)
             }
             other => {
                 if self.tx_state.active {
@@ -86,10 +91,7 @@ impl CommandProcessor {
                 self.storage.set(key, new_value.to_string()).await;
                 CommandResult::Integer(new_value)
             }
-            RedisCommand::Multi => {
-                CommandResult::RedisError("Internal command routing error".to_string())
-            }
-            RedisCommand::Exec => {
+            RedisCommand::Multi | RedisCommand::Exec => {
                 CommandResult::RedisError("Internal command routing error".to_string())
             }
         }
