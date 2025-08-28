@@ -21,6 +21,14 @@ impl RedisResponse {
                 }
             }
             CommandResult::Integer(number) => format!(":{}\r\n", number.to_string()).into_bytes(),
+            CommandResult::Array(elements) => {
+                let mut bytes = format!("*{}\r\n", elements.len()).into_bytes();
+                for element in elements {
+                    let part = RedisResponse::from_result(element).data;
+                    bytes.extend(part);
+                }
+                bytes
+            }
             CommandResult::RedisError(error) => format!("-ERR {}\r\n", error).into_bytes(),
         };
         Self { data }

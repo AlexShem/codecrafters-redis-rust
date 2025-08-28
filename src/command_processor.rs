@@ -3,14 +3,24 @@ use crate::storage::Storage;
 
 pub struct CommandProcessor {
     storage: Storage,
+    tx_state: TransactionState,
+}
+
+#[derive(Default)]
+struct TransactionState {
+    active: bool,
+    queue: Vec<RedisCommand>,
 }
 
 impl CommandProcessor {
     pub fn new(storage: Storage) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            tx_state: TransactionState::default(),
+        }
     }
 
-    pub async fn execute(&self, command: RedisCommand) -> CommandResult {
+    pub async fn execute(&mut self, command: RedisCommand) -> CommandResult {
         match command {
             RedisCommand::Ping => CommandResult::Pong,
             RedisCommand::Echo(message) => CommandResult::Echo(message),
@@ -49,9 +59,21 @@ impl CommandProcessor {
                 CommandResult::Integer(new_value)
             }
             RedisCommand::Multi => {
+                self.tx_state.active = true;
+                self.tx_state.queue.clear();
                 CommandResult::Ok
             }
             RedisCommand::Exec => {
+                if !self.tx_state.active {
+                    return CommandResult::RedisError("EXEC without MULTI".to_string());
+                }
+
+                self.tx_state.active = false;
+                let queued = std::mem::take(&mut self.tx_state.queue);
+                if queued.is_empty() {
+                    return CommandResult::Array(vec![]);
+                }
+
                 CommandResult::RedisError("EXEC without MULTI".to_string())
             }
         }

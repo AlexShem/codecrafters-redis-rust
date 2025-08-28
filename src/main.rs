@@ -28,7 +28,7 @@ async fn main() {
 }
 
 async fn handle_connection(mut stream: TcpStream, storage: Storage) {
-    let processor = CommandProcessor::new(storage);
+    let mut processor = CommandProcessor::new(storage);
 
     loop {
         let mut buf = [0; 512];
