@@ -22,6 +22,37 @@ impl CommandProcessor {
 
     pub async fn execute(&mut self, command: RedisCommand) -> CommandResult {
         match command {
+            RedisCommand::Multi => {
+                self.tx_state.active = true;
+                self.tx_state.queue.clear();
+                CommandResult::Ok
+            }
+            RedisCommand::Exec => {
+                if !self.tx_state.active {
+                    return CommandResult::RedisError("EXEC without MULTI".to_string());
+                }
+
+                self.tx_state.active = false;
+                let queued = std::mem::take(&mut self.tx_state.queue);
+                if queued.is_empty() {
+                    return CommandResult::Array(vec![]);
+                }
+
+                CommandResult::RedisError("EXEC without MULTI".to_string())
+            }
+            other => {
+                if self.tx_state.active {
+                    self.tx_state.queue.push(other);
+                    CommandResult::Queued
+                } else {
+                    self.execute_primitive(other).await
+                }
+            }
+        }
+    }
+
+    pub async fn execute_primitive(&mut self, command: RedisCommand) -> CommandResult {
+        match command {
             RedisCommand::Ping => CommandResult::Pong,
             RedisCommand::Echo(message) => CommandResult::Echo(message),
             RedisCommand::Set { key, value } => {
@@ -43,38 +74,23 @@ impl CommandProcessor {
             RedisCommand::Incr(key) => {
                 let new_value = match self.storage.get(&key).await {
                     None => 1,
-                    Some(value_str) => {
-                        if let Ok(value) = value_str.parse::<i64>() {
-                            dbg!(&value);
-                            value + 1
-                        } else {
-                            dbg!(&value_str);
+                    Some(value_str) => match value_str.parse::<i64>() {
+                        Ok(value) => value + 1,
+                        Err(_) => {
                             return CommandResult::RedisError(
                                 "value is not an integer or out of range".to_string(),
                             );
                         }
-                    }
+                    },
                 };
                 self.storage.set(key, new_value.to_string()).await;
                 CommandResult::Integer(new_value)
             }
             RedisCommand::Multi => {
-                self.tx_state.active = true;
-                self.tx_state.queue.clear();
-                CommandResult::Ok
+                CommandResult::RedisError("Internal command routing error".to_string())
             }
             RedisCommand::Exec => {
-                if !self.tx_state.active {
-                    return CommandResult::RedisError("EXEC without MULTI".to_string());
-                }
-
-                self.tx_state.active = false;
-                let queued = std::mem::take(&mut self.tx_state.queue);
-                if queued.is_empty() {
-                    return CommandResult::Array(vec![]);
-                }
-
-                CommandResult::RedisError("EXEC without MULTI".to_string())
+                CommandResult::RedisError("Internal command routing error".to_string())
             }
         }
     }

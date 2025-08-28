@@ -24,6 +24,7 @@ pub enum CommandResult {
     Pong,
     Echo(String),
     Ok,
+    Queued,
     Value(Option<String>),
     Integer(i64),
     Array(Vec<CommandResult>),
