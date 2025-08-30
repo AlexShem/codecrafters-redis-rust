@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 
@@ -8,6 +9,8 @@ pub enum Value {
     Array(Vec<Value>),
     #[allow(unused)]
     Integer(i64),
+    #[allow(unused)]
+    Double(f64),
 }
 
 pub fn parse_value(buf: &mut Bytes) -> anyhow::Result<Value> {
@@ -21,6 +24,7 @@ pub fn parse_value(buf: &mut Bytes) -> anyhow::Result<Value> {
         b'$' => parse_bulk_string(buf),
         b'*' => parse_array(buf),
         b':' => parse_integer(buf),
+        b',' => parse_double(buf),
         _ => Err(anyhow!("Unsupported data type: {}", first_byte as char)),
     }
 }
@@ -41,6 +45,14 @@ fn parse_integer(buf: &mut Bytes) -> anyhow::Result<Value> {
     };
 
     Ok(Value::Integer(number))
+}
+
+fn parse_double(buf: &mut Bytes) -> anyhow::Result<Value> {
+    let line = read_until_crlf(buf)?;
+    let number_str = String::from_utf8(line)?;
+    let number = f64::from_str(number_str.as_str())?;
+
+    Ok(Value::Double(number))
 }
 
 fn parse_array(buf: &mut Bytes) -> anyhow::Result<Value> {

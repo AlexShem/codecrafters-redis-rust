@@ -131,6 +131,10 @@ impl CommandProcessor {
                     CommandResult::RedisError(format!("Pattern {} is not supported", pattern))
                 }
             }
+            RedisCommand::Zadd { .. } => {
+                // todo!()
+                CommandResult::Integer(1)
+            }
         }
     }
 }

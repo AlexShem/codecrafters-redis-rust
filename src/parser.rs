@@ -133,6 +133,14 @@ impl Parser {
                         let pattern = self.extract_string(&elements[1])?;
                         Ok(RedisCommand::Keys(pattern))
                     }
+                    "ZADD" => {
+                        if elements.len() != 4 {
+                            return Err(anyhow!("ZADD command requires exactly three arguments"));
+                        }
+
+                        // todo!()
+                        Ok(RedisCommand::Zadd { key: String::new(), score: 0.0, member: String::new() })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }
