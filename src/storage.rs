@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use bytes::{Buf, Bytes};
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,6 +14,8 @@ use tokio::time::Instant;
 #[derive(Clone)]
 pub struct Storage {
     data: Arc<RwLock<HashMap<String, StoredValue>>>,
+    /// Sorted sets, stored as set name `String` and the `SortedSet`.
+    sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
     #[allow(unused)]
     file_path: Option<PathBuf>,
     dir: Option<String>,
@@ -22,6 +25,17 @@ pub struct Storage {
 struct StoredValue {
     value: String,
     expires_at: Option<Instant>,
+}
+
+struct SortedSet {
+    by_member: HashMap<String, f64>,
+    ordered: BTreeSet<ScoredMember>,
+}
+
+#[derive(Clone)]
+struct ScoredMember {
+    score: f64,
+    member: String,
 }
 
 impl Storage {
@@ -34,12 +48,14 @@ impl Storage {
             match read_database_file(path.clone()).await {
                 Ok(data) => Self {
                     data: Arc::new(RwLock::new(data)),
+                    sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
                 },
                 Err(_) => Self {
                     data: Arc::new(RwLock::new(HashMap::new())),
+                    sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
@@ -48,6 +64,7 @@ impl Storage {
         } else {
             Self {
                 data: Arc::new(RwLock::new(HashMap::new())),
+                sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                 file_path,
                 dir,
                 dbfilename,
@@ -113,6 +130,12 @@ impl Storage {
             Some(valid_keys)
         }
     }
+
+    pub async fn zadd(&self, key: String, score: f64, member: String) -> usize {
+        let mut sets = self.sorted_sets.write().await;
+        let set = sets.entry(key).or_insert_with(|| SortedSet::new());
+        set.zadd(score, member)
+    }
 }
 
 impl StoredValue {
@@ -135,6 +158,61 @@ impl StoredValue {
             Instant::now() > expires_at
         } else {
             false
+        }
+    }
+}
+
+impl SortedSet {
+    fn new() -> Self {
+        Self {
+            by_member: HashMap::new(),
+            ordered: BTreeSet::new(),
+        }
+    }
+
+    fn zadd(&mut self, score: f64, member: String) -> usize {
+        if !score.is_finite() {
+            return 0;
+        }
+        if let Some(old_score) = self.by_member.get(&member) {
+            if *old_score == score {
+                return 0;
+            }
+            let old = ScoredMember {
+                score: *old_score,
+                member: member.clone(),
+            };
+            self.ordered.remove(&old);
+            self.by_member.insert(member.clone(), score);
+            self.ordered.insert(ScoredMember { score, member });
+            0
+        } else {
+            self.by_member.insert(member.clone(), score);
+            self.ordered.insert(ScoredMember { score, member });
+            1
+        }
+    }
+}
+
+impl Eq for ScoredMember {}
+
+impl PartialEq for ScoredMember {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.to_bits() == other.score.to_bits() && self.member == other.member
+    }
+}
+
+impl PartialOrd for ScoredMember {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoredMember {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.score.partial_cmp(&other.score) {
+            Some(Ordering::Equal) | None => self.member.cmp(&other.member),
+            Some(ord) => ord,
         }
     }
 }

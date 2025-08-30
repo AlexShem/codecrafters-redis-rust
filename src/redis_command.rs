@@ -20,7 +20,6 @@ pub enum RedisCommand {
     Discard,
     ConfigGet(String),
     Keys(String),
-    #[allow(unused)]
     Zadd {
         key: String,
         score: f64,

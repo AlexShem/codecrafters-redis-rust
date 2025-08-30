@@ -131,9 +131,9 @@ impl CommandProcessor {
                     CommandResult::RedisError(format!("Pattern {} is not supported", pattern))
                 }
             }
-            RedisCommand::Zadd { .. } => {
-                // todo!()
-                CommandResult::Integer(1)
+            RedisCommand::Zadd { key, score, member } => {
+                let added_count = self.storage.zadd(key, score, member).await;
+                CommandResult::Integer(added_count as i64)
             }
         }
     }

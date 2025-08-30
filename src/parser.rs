@@ -2,6 +2,7 @@ use crate::redis_command::RedisCommand;
 use crate::types::{parse_value, Value};
 use anyhow::anyhow;
 use bytes::Bytes;
+use std::str::FromStr;
 
 pub struct Parser;
 
@@ -137,9 +138,12 @@ impl Parser {
                         if elements.len() != 4 {
                             return Err(anyhow!("ZADD command requires exactly three arguments"));
                         }
+                        let key = self.extract_string(&elements[1])?;
+                        let score_str = self.extract_string(&elements[2])?;
+                        let member = self.extract_string(&elements[3])?;
 
-                        // todo!()
-                        Ok(RedisCommand::Zadd { key: String::new(), score: 0.0, member: String::new() })
+                        let score = f64::from_str(&score_str)?;
+                        Ok(RedisCommand::Zadd { key, score, member })
                     }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
@@ -155,6 +159,14 @@ impl Parser {
             Value::BulkString(bytes) => String::from_utf8(bytes.clone())
                 .map_err(|e| anyhow!("Invalid UTF-8 in string: {}", e)),
             _ => Err(anyhow!("Expected string value")),
+        }
+    }
+
+    #[allow(unused)]
+    fn extract_double(&self, value: &Value) -> anyhow::Result<f64> {
+        match value {
+            Value::Double(val) => Ok(val.clone()),
+            _ => Err(anyhow!("Expected double value")),
         }
     }
 }
