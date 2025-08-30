@@ -82,7 +82,7 @@ fn parse_args() -> (Option<String>, Option<String>) {
                     dir = Some(args[i + 1].clone());
                     i += 2;
                 } else {
-                    eprintln!("Error: --dir requries a value");
+                    eprintln!("Error: --dir requires a value");
                     i += 1;
                 }
             }
@@ -91,7 +91,7 @@ fn parse_args() -> (Option<String>, Option<String>) {
                     dbfilename = Some(args[i + 1].clone());
                     i += 2;
                 } else {
-                    eprintln!("Error: --dbfilename requries a value");
+                    eprintln!("Error: --dbfilename requires a value");
                     i += 1;
                 }
             }
