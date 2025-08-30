@@ -145,6 +145,15 @@ impl Parser {
                         let score = f64::from_str(&score_str)?;
                         Ok(RedisCommand::Zadd { key, score, member })
                     }
+                    "ZRANK" => {
+                        if elements.len() != 3 {
+                            return Err(anyhow!("ZRANK command requires exactly two arguments"));
+                        }
+                        let key = self.extract_string(&elements[1])?;
+                        let member = self.extract_string(&elements[2])?;
+
+                        Ok(RedisCommand::Zrank { key, member })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

@@ -136,6 +136,15 @@ impl Storage {
         let set = sets.entry(key).or_insert_with(|| SortedSet::new());
         set.zadd(score, member)
     }
+
+    pub async fn zrank(&self, key: String, member: String) -> Option<usize> {
+        let sets = self.sorted_sets.read().await;
+        if let Some(set) = sets.get(&key) {
+            set.zrank(member)
+        } else {
+            None
+        }
+    }
 }
 
 impl StoredValue {
@@ -191,6 +200,18 @@ impl SortedSet {
             self.ordered.insert(ScoredMember { score, member });
             1
         }
+    }
+
+    fn zrank(&self, member: String) -> Option<usize> {
+        if self.by_member.contains_key(&member) {
+            for (rank, scored_member) in self.ordered.iter().enumerate() {
+                if scored_member.member == member {
+                    return Some(rank);
+                }
+            }
+            return None;
+        }
+        None
     }
 }
 

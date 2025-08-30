@@ -135,6 +135,13 @@ impl CommandProcessor {
                 let added_count = self.storage.zadd(key, score, member).await;
                 CommandResult::Integer(added_count as i64)
             }
+            RedisCommand::Zrank { key, member } => {
+                if let Some(rank) = self.storage.zrank(key, member).await {
+                    CommandResult::Integer(rank as i64)
+                } else {
+                    CommandResult::Value(None)
+                }
+            }
         }
     }
 }

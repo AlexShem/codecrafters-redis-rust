@@ -25,6 +25,10 @@ pub enum RedisCommand {
         score: f64,
         member: String,
     },
+    Zrank {
+        key: String,
+        member: String,
+    },
 }
 
 #[derive(Debug, Clone)]
