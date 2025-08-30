@@ -19,6 +19,7 @@ pub enum RedisCommand {
     Exec,
     Discard,
     ConfigGet(String),
+    Keys(String),
 }
 
 #[derive(Debug, Clone)]

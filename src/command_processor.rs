@@ -116,6 +116,21 @@ impl CommandProcessor {
                     arg
                 )),
             },
+            RedisCommand::Keys(pattern) => {
+                if pattern == "*" {
+                    if let Some(keys) = self.storage.get_all().await {
+                        let mut values = Vec::with_capacity(keys.len());
+                        for key in keys {
+                            values.push(CommandResult::Value(Some(key)));
+                        }
+                        CommandResult::Array(values)
+                    } else {
+                        CommandResult::Value(None)
+                    }
+                } else {
+                    CommandResult::RedisError(format!("Pattern {} is not supported", pattern))
+                }
+            }
         }
     }
 }

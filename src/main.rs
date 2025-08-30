@@ -5,12 +5,12 @@ mod redis_response;
 mod storage;
 mod types;
 
-use std::path::PathBuf;
 use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;
 use crate::redis_command::RedisCommand;
 use crate::redis_response::RedisResponse;
 use crate::storage::Storage;
+use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -24,7 +24,7 @@ async fn main() {
     };
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-    let storage = Storage::new(file_path, dir, dbfilename);
+    let storage = Storage::new(file_path, dir, dbfilename).await;
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();

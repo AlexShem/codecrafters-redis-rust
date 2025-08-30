@@ -125,6 +125,14 @@ impl Parser {
                         let argument = self.extract_string(&elements[2])?;
                         Ok(RedisCommand::ConfigGet(argument))
                     }
+                    "KEYS" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("KEYS command requires exactly one argument"));
+                        }
+
+                        let pattern = self.extract_string(&elements[1])?;
+                        Ok(RedisCommand::Keys(pattern))
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }
