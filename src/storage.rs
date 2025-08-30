@@ -3,10 +3,11 @@ use bytes::{Buf, Bytes};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
+use tokio::time::Duration;
 use tokio::time::Instant;
 
 #[derive(Clone)]
@@ -90,15 +91,26 @@ impl Storage {
     }
 
     pub async fn get_all(&self) -> Option<Vec<String>> {
-        let data = self.data.write().await;
-        let mut keys = Vec::with_capacity(data.len());
-        for key in data.keys() {
-            keys.push(key.clone());
+        let mut data = self.data.write().await;
+        let mut keys_to_remove = Vec::new();
+        let mut valid_keys = Vec::new();
+
+        for (key, stored_value) in data.iter() {
+            if stored_value.is_expired() {
+                keys_to_remove.push(key.clone());
+            } else {
+                valid_keys.push(key.clone());
+            }
         }
-        if keys.is_empty() {
+
+        for key in keys_to_remove {
+            data.remove(&key);
+        }
+
+        if valid_keys.is_empty() {
             None
         } else {
-            Some(keys)
+            Some(valid_keys)
         }
     }
 }
@@ -145,26 +157,18 @@ async fn read_database_file(file_path: PathBuf) -> anyhow::Result<HashMap<String
         return Err(anyhow!("Invalid magic string, expected REDIS"));
     }
     let version = content.slice(5..9);
-    let version_str = std::str::from_utf8(&version)?;
+    let _version_str = std::str::from_utf8(&version)?;
 
     content.advance(9);
-    println!("RDB Version: {}", version_str);
 
     // 2. Metadata section
-    let metadata = read_metadata(&mut content)?;
-    metadata
-        .iter()
-        .for_each(|data| println!("Metadata: {}", data));
+    let _metadata = read_metadata(&mut content)?;
 
     // 3. Database section
     let database = read_database(&mut content)?;
-    database
-        .iter()
-        .for_each(|entry| println!("Data Key: {}", entry.0));
 
     // 4. End of file section
-    let end_of_file = read_eof(&mut content)?;
-    println!("End of file check sum: {}", end_of_file);
+    let _end_of_file = read_eof(&mut content)?;
 
     Ok(database)
 }
@@ -203,7 +207,8 @@ fn read_database(content: &mut Bytes) -> anyhow::Result<HashMap<String, StoredVa
                 ));
             }
 
-            content.advance(2); // todo: Should read the sizes of tables here instead of advancing
+            // Should read the sizes of tables here instead of advancing
+            content.advance(2);
 
             while let Some(&table_type) = content.first() {
                 match table_type {
@@ -218,9 +223,12 @@ fn read_database(content: &mut Bytes) -> anyhow::Result<HashMap<String, StoredVa
                             ));
                         }
                         let (key, value) = (read_encoded(content)?, read_encoded(content)?);
-                        // todo This duration is calculated incorrectly
-                        let stored_value =
-                            StoredValue::with_expiry(value, timestamp_seconds as u64);
+                        let expires_at =
+                            unix_timestamp_to_instant(timestamp_seconds as u64 * 1000)?;
+                        let stored_value = StoredValue {
+                            value,
+                            expires_at: Some(expires_at),
+                        };
                         database.insert(key, stored_value);
                     }
                     0xFC => {
@@ -234,8 +242,11 @@ fn read_database(content: &mut Bytes) -> anyhow::Result<HashMap<String, StoredVa
                             ));
                         }
                         let (key, value) = (read_encoded(content)?, read_encoded(content)?);
-                        // todo This duration is calculated incorrectly
-                        let stored_value = StoredValue::with_expiry(value, timestamp_milliseconds);
+                        let expires_at = unix_timestamp_to_instant(timestamp_milliseconds)?;
+                        let stored_value = StoredValue {
+                            value,
+                            expires_at: Some(expires_at),
+                        };
                         database.insert(key, stored_value);
                     }
                     0x00 => {
@@ -317,10 +328,32 @@ fn read_encoded(content: &mut Bytes) -> anyhow::Result<String> {
                     let value = content.get_u32_le();
                     Ok(value.to_string())
                 }
-                0xC3 => todo!(),
+                0xC3 => Err(anyhow!("LZF compressed string is not supported")),
                 _ => Err(anyhow!("Unexpected string encoding: {}", size_encoding)),
             }
         }
         _ => Err(anyhow!("Unexpected size encoded value: {}", size_encoding)),
+    }
+}
+
+fn unix_timestamp_to_instant(timestamp_ms: u64) -> anyhow::Result<Instant> {
+    let now_system = SystemTime::now();
+    let now_instant = Instant::now();
+
+    // Calculate the offset between SystemTime::now() and Instant::now()
+    if let Ok(duration_since_unix) = now_system.duration_since(UNIX_EPOCH) {
+        let target_duration = Duration::from_millis(timestamp_ms);
+
+        if target_duration > duration_since_unix {
+            // Future time - add the difference to current Instant
+            let diff = target_duration - duration_since_unix;
+            Ok(now_instant + diff)
+        } else {
+            // Past - subtract the difference from current Instant
+            let diff = duration_since_unix - target_duration;
+            Ok(now_instant - diff)
+        }
+    } else {
+        Err(anyhow!("System time is before Unix epoch"))
     }
 }
