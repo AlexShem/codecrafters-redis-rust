@@ -218,7 +218,7 @@ fn read_database(content: &mut Bytes) -> anyhow::Result<HashMap<String, StoredVa
                             ));
                         }
                         let (key, value) = (read_encoded(content)?, read_encoded(content)?);
-                        // todo This duration is calcaulted incorrectly
+                        // todo This duration is calculated incorrectly
                         let stored_value =
                             StoredValue::with_expiry(value, timestamp_seconds as u64);
                         database.insert(key, stored_value);
@@ -234,7 +234,7 @@ fn read_database(content: &mut Bytes) -> anyhow::Result<HashMap<String, StoredVa
                             ));
                         }
                         let (key, value) = (read_encoded(content)?, read_encoded(content)?);
-                        // todo This duration is calcaulted incorrectly
+                        // todo This duration is calculated incorrectly
                         let stored_value = StoredValue::with_expiry(value, timestamp_milliseconds);
                         database.insert(key, stored_value);
                     }
