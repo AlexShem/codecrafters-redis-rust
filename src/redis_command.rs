@@ -29,6 +29,11 @@ pub enum RedisCommand {
         key: String,
         member: String,
     },
+    Zrange {
+        key: String,
+        start: usize,
+        end: usize,
+    },
 }
 
 #[derive(Debug, Clone)]

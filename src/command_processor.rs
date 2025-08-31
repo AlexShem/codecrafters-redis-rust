@@ -142,6 +142,17 @@ impl CommandProcessor {
                     CommandResult::Value(None)
                 }
             }
+            RedisCommand::Zrange { key, start, end } => {
+                if let Some(members) = self.storage.zrange(key, start, end).await {
+                    let mut values = Vec::with_capacity(members.len());
+                    for member in members {
+                        values.push(CommandResult::Value(Some(member)));
+                    }
+                    CommandResult::Array(values)
+                } else {
+                    CommandResult::Array(vec![])
+                }
+            }
         }
     }
 }
