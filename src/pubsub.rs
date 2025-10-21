@@ -1,3 +1,4 @@
+use crate::redis_command::RedisCommand;
 use std::collections::HashSet;
 
 pub struct PubSubClient {
@@ -18,4 +19,8 @@ impl PubSubClient {
     pub fn count(&self) -> usize {
         self.channels.len()
     }
+}
+
+pub fn is_command_allowed_in_subscribe_mode(command: &RedisCommand) -> bool {
+    matches!(command, RedisCommand::Subscribe { .. } | RedisCommand::Ping)
 }

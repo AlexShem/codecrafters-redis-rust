@@ -1,4 +1,4 @@
-use crate::pubsub::PubSubClient;
+use crate::pubsub::{is_command_allowed_in_subscribe_mode, PubSubClient};
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
 
@@ -6,6 +6,7 @@ pub struct CommandProcessor {
     storage: Storage,
     tx_state: TransactionState,
     pub_sub_client: PubSubClient,
+    pub_sub_state: PubSubState,
 }
 
 #[derive(Default)]
@@ -14,12 +15,18 @@ struct TransactionState {
     queue: Vec<RedisCommand>,
 }
 
+#[derive(Default)]
+struct PubSubState {
+    active: bool,
+}
+
 impl CommandProcessor {
     pub fn new(storage: Storage) -> Self {
         Self {
             storage,
             tx_state: TransactionState::default(),
             pub_sub_client: PubSubClient::new(),
+            pub_sub_state: PubSubState::default(),
         }
     }
 
@@ -60,10 +67,15 @@ impl CommandProcessor {
             other => {
                 if self.tx_state.active {
                     self.tx_state.queue.push(other);
-                    CommandResult::Queued
-                } else {
-                    self.execute_primitive(other).await
+                    return CommandResult::Queued;
                 }
+
+                if self.pub_sub_state.active {
+                    if !is_command_allowed_in_subscribe_mode(&other) {
+                        return CommandResult::RedisError(format!("Can't execute '{}'", other));
+                    }
+                }
+                self.execute_primitive(other).await
             }
         }
     }
@@ -179,6 +191,7 @@ impl CommandProcessor {
             }
             RedisCommand::Subscribe { channel } => {
                 if let Ok(_) = self.pub_sub_client.subscribe(&channel) {
+                    self.pub_sub_state.active = true;
                     let subscribe = String::from("subscribe");
                     let count = self.pub_sub_client.count();
                     CommandResult::Array(vec![
