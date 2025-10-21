@@ -1,9 +1,11 @@
+use crate::pubsub::PubSubClient;
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
 
 pub struct CommandProcessor {
     storage: Storage,
     tx_state: TransactionState,
+    pub_sub_client: PubSubClient,
 }
 
 #[derive(Default)]
@@ -17,6 +19,7 @@ impl CommandProcessor {
         Self {
             storage,
             tx_state: TransactionState::default(),
+            pub_sub_client: PubSubClient::new(),
         }
     }
 
@@ -174,11 +177,19 @@ impl CommandProcessor {
                     CommandResult::Integer(0)
                 }
             }
-            RedisCommand::Subscribe { channel } => CommandResult::Array(vec![
-                CommandResult::Value(Some("subscribe".to_string())),
-                CommandResult::Value(Some(channel)),
-                CommandResult::Integer(1),
-            ]),
+            RedisCommand::Subscribe { channel } => {
+                if let Ok(_) = self.pub_sub_client.subscribe(&channel) {
+                    let subscribe = String::from("subscribe");
+                    let count = self.pub_sub_client.count();
+                    CommandResult::Array(vec![
+                        CommandResult::Value(Some(subscribe)),
+                        CommandResult::Value(Some(channel)),
+                        CommandResult::Integer(count as i64),
+                    ])
+                } else {
+                    CommandResult::RedisError(String::from("Failed to subscribe to the channel"))
+                }
+            }
         }
     }
 }
