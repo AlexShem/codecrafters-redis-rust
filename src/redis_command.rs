@@ -41,6 +41,10 @@ pub enum RedisCommand {
         key: String,
         member: String,
     },
+    Zrem {
+        key: String,
+        member: String,
+    },
 }
 
 #[derive(Debug, Clone)]

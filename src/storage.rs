@@ -172,6 +172,15 @@ impl Storage {
             None
         }
     }
+
+    pub async fn zrem(&mut self, key: String, member: String) -> Option<usize> {
+        let mut sets = self.sorted_sets.write().await;
+        if let Some(set) = sets.get_mut(&key) {
+            set.zrem(member)
+        } else {
+            None
+        }
+    }
 }
 
 impl StoredValue {
@@ -278,6 +287,19 @@ impl SortedSet {
 
     fn zscore(&self, member: String) -> Option<f64> {
         self.by_member.get(&member).copied()
+    }
+
+    fn zrem(&mut self, member: String) -> Option<usize> {
+        if let Some(score) =self.by_member.remove(&member) {
+            let old = ScoredMember {
+                score,
+                member: member.clone(),
+            };
+            self.ordered.remove(&old);
+            Some(1)
+        } else {
+            None
+        }
     }
 }
 

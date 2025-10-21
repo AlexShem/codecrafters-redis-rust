@@ -167,6 +167,13 @@ impl CommandProcessor {
                     CommandResult::Value(None)
                 }
             }
+            RedisCommand::Zrem {key, member } => {
+                if let Some(removed) = self.storage.zrem(key, member).await {
+                    CommandResult::Integer(removed as i64)
+                } else {
+                    CommandResult::Integer(0)
+                }
+            }
         }
     }
 }
