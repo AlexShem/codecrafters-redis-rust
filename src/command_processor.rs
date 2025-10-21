@@ -160,6 +160,13 @@ impl CommandProcessor {
                     CommandResult::Integer(0)
                 }
             }
+            RedisCommand::Zscore {key, member} => {
+                if let Some(score) = self.storage.zscore(key, member).await {
+                    CommandResult::Value(Some(score.to_string()))
+                } else {
+                    CommandResult::Value(None)
+                }
+            }
         }
     }
 }

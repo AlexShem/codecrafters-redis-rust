@@ -37,6 +37,10 @@ pub enum RedisCommand {
     Zcard {
         key: String,
     },
+    Zscore {
+        key: String,
+        member: String,
+    },
 }
 
 #[derive(Debug, Clone)]

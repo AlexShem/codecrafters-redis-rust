@@ -163,6 +163,15 @@ impl Storage {
             None
         }
     }
+
+    pub async fn zscore(&self, key: String, member: String) -> Option<f64> {
+        let sets = self.sorted_sets.read().await;
+        if let Some(set) = sets.get(&key) {
+            set.zscore(member)
+        } else {
+            None
+        }
+    }
 }
 
 impl StoredValue {
@@ -265,6 +274,10 @@ impl SortedSet {
 
     fn zcard(&self) -> usize {
         self.by_member.len()
+    }
+
+    fn zscore(&self, member: String) -> Option<f64> {
+        self.by_member.get(&member).copied()
     }
 }
 
