@@ -191,6 +191,14 @@ impl Parser {
 
                         Ok(RedisCommand::Zrem { key, member })
                     }
+                    "SUBSCRIBE" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("SUBSCRIBE command requires exactly one argument"));
+                        }
+                        let channel = self.extract_string(&elements[1])?;
+
+                        Ok(RedisCommand::Subscribe { channel })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

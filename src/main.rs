@@ -4,6 +4,7 @@ mod redis_command;
 mod redis_response;
 mod storage;
 mod types;
+mod pubsub;
 
 use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;

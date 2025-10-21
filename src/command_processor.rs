@@ -160,20 +160,25 @@ impl CommandProcessor {
                     CommandResult::Integer(0)
                 }
             }
-            RedisCommand::Zscore {key, member} => {
+            RedisCommand::Zscore { key, member } => {
                 if let Some(score) = self.storage.zscore(key, member).await {
                     CommandResult::Value(Some(score.to_string()))
                 } else {
                     CommandResult::Value(None)
                 }
             }
-            RedisCommand::Zrem {key, member } => {
+            RedisCommand::Zrem { key, member } => {
                 if let Some(removed) = self.storage.zrem(key, member).await {
                     CommandResult::Integer(removed as i64)
                 } else {
                     CommandResult::Integer(0)
                 }
             }
+            RedisCommand::Subscribe { channel } => CommandResult::Array(vec![
+                CommandResult::Value(Some("subscribe".to_string())),
+                CommandResult::Value(Some(channel)),
+                CommandResult::Integer(1),
+            ]),
         }
     }
 }

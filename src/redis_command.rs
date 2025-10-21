@@ -45,6 +45,9 @@ pub enum RedisCommand {
         key: String,
         member: String,
     },
+    Subscribe {
+        channel: String,
+    },
 }
 
 #[derive(Debug, Clone)]
