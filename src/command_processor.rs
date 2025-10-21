@@ -153,6 +153,13 @@ impl CommandProcessor {
                     CommandResult::Array(vec![])
                 }
             }
+            RedisCommand::Zcard { key } => {
+                if let Some(cardinality) = self.storage.zcard(key).await {
+                    CommandResult::Integer(cardinality as i64)
+                } else {
+                    CommandResult::Integer(0)
+                }
+            }
         }
     }
 }

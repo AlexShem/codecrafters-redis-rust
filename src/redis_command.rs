@@ -34,6 +34,9 @@ pub enum RedisCommand {
         start: i32,
         end: i32,
     },
+    Zcard {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]

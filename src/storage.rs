@@ -154,6 +154,15 @@ impl Storage {
             None
         }
     }
+
+    pub async fn zcard(&self, key: String) -> Option<usize> {
+        let sets = self.sorted_sets.read().await;
+        if let Some(set) = sets.get(&key) {
+            Some(set.zcard())
+        } else {
+            None
+        }
+    }
 }
 
 impl StoredValue {
@@ -252,6 +261,10 @@ impl SortedSet {
             })
             .collect();
         Some(members)
+    }
+
+    fn zcard(&self) -> usize {
+        self.by_member.len()
     }
 }
 
