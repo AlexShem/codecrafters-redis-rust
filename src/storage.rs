@@ -146,7 +146,7 @@ impl Storage {
         }
     }
 
-    pub async fn zrange(&self, key: String, start: usize, end: usize) -> Option<Vec<String>> {
+    pub async fn zrange(&self, key: String, start: i32, end: i32) -> Option<Vec<String>> {
         let sets = self.sorted_sets.read().await;
         if let Some(set) = sets.get(&key) {
             set.zrange(start, end)
@@ -223,8 +223,15 @@ impl SortedSet {
         None
     }
 
-    fn zrange(&self, start: usize, end: usize) -> Option<Vec<String>> {
-        let members_size = self.by_member.len();
+    fn zrange(&self, start: i32, end: i32) -> Option<Vec<String>> {
+        let members_size = self.by_member.len() as i32;
+
+        let (start, end) = match (start.is_negative(), end.is_negative()) {
+            (false, false) => (start, end),
+            (false, true) => (start, members_size + end),
+            (true, false) => (members_size + start, end),
+            (true, true) => (members_size + start, members_size + end),
+        };
 
         if start >= members_size || start > end {
             return None;
@@ -237,7 +244,7 @@ impl SortedSet {
             .iter()
             .enumerate()
             .filter_map(|(idx, scored_member)| {
-                if first <= idx && idx <= last {
+                if first <= idx as i32 && idx as i32 <= last {
                     Some(scored_member.member.clone())
                 } else {
                     None

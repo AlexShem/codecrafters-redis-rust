@@ -31,8 +31,8 @@ pub enum RedisCommand {
     },
     Zrange {
         key: String,
-        start: usize,
-        end: usize,
+        start: i32,
+        end: i32,
     },
 }
 

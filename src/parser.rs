@@ -159,8 +159,8 @@ impl Parser {
                             return Err(anyhow!("ZRANGE command requires exactly three arguments"));
                         }
                         let key = self.extract_string(&elements[1])?;
-                        let start: usize = self.extract_string(&elements[2])?.parse()?;
-                        let end: usize = self.extract_string(&elements[3])?.parse()?;
+                        let start: i32 = self.extract_string(&elements[2])?.parse()?;
+                        let end: i32 = self.extract_string(&elements[3])?.parse()?;
 
                         Ok(RedisCommand::Zrange { key, start, end })
                     }
