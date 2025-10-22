@@ -50,6 +50,11 @@ pub enum RedisCommand {
     Subscribe {
         channel: String,
     },
+    Publish {
+        channel: String,
+        #[allow(unused)]
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +91,7 @@ impl Display for RedisCommand {
             RedisCommand::Zscore { .. } => f.write_str("ZSCORE"),
             RedisCommand::Zrem { .. } => f.write_str("ZREM"),
             RedisCommand::Subscribe { .. } => f.write_str("SUBSCRIBE"),
+            RedisCommand::Publish { .. } => f.write_str("PUBLISH"),
         }
     }
 }

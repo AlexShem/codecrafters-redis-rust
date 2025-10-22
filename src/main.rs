@@ -1,19 +1,23 @@
 mod command_processor;
 mod parser;
+mod pubsub;
 mod redis_command;
 mod redis_response;
 mod storage;
 mod types;
-mod pubsub;
 
 use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;
+use crate::pubsub::{ClientId, PubSubManager};
 use crate::redis_command::RedisCommand;
 use crate::redis_response::RedisResponse;
 use crate::storage::Storage;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+
+static CLIENT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() {
@@ -26,18 +30,26 @@ async fn main() {
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
     let storage = Storage::new(file_path, dir, dbfilename).await;
+    let pub_sub_manager = PubSubManager::new();
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
         let storage_clone = storage.clone();
+        let pub_sub_manager_clone = pub_sub_manager.clone();
+        let client_id = CLIENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
         tokio::spawn(async move {
-            handle_connection(stream, storage_clone).await;
+            handle_connection(stream, storage_clone, pub_sub_manager_clone, client_id).await;
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, storage: Storage) {
-    let mut processor = CommandProcessor::new(storage);
+async fn handle_connection(
+    mut stream: TcpStream,
+    storage: Storage,
+    pub_sub_manager: PubSubManager,
+    client_id: ClientId,
+) {
+    let mut processor = CommandProcessor::new(storage, pub_sub_manager, client_id);
 
     loop {
         let mut buf = [0; 512];

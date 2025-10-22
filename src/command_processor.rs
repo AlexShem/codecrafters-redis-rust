@@ -1,10 +1,11 @@
-use crate::pubsub::{is_command_allowed_in_subscribe_mode, PubSubClient};
+use crate::pubsub::{is_command_allowed_in_subscribe_mode, ClientId, PubSubClient, PubSubManager};
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
 
 pub struct CommandProcessor {
     storage: Storage,
     tx_state: TransactionState,
+    pub_sub_manager: PubSubManager,
     pub_sub_client: PubSubClient,
     pub_sub_state: PubSubState,
 }
@@ -21,11 +22,12 @@ struct PubSubState {
 }
 
 impl CommandProcessor {
-    pub fn new(storage: Storage) -> Self {
+    pub fn new(storage: Storage, pub_sub_manager: PubSubManager, client_id: ClientId) -> Self {
         Self {
             storage,
             tx_state: TransactionState::default(),
-            pub_sub_client: PubSubClient::new(),
+            pub_sub_manager,
+            pub_sub_client: PubSubClient::new(client_id),
             pub_sub_state: PubSubState::default(),
         }
     }
@@ -196,8 +198,13 @@ impl CommandProcessor {
                 }
             }
             RedisCommand::Subscribe { channel } => {
-                if let Ok(_) = self.pub_sub_client.subscribe(&channel) {
+                if self.pub_sub_client.subscribe(&channel) {
                     self.pub_sub_state.active = true;
+                    let client_id = self.pub_sub_client.client_id();
+                    self.pub_sub_manager
+                        .subscribe(client_id, channel.clone())
+                        .await;
+
                     let subscribe = String::from("subscribe");
                     let count = self.pub_sub_client.count();
                     CommandResult::Array(vec![
@@ -208,6 +215,10 @@ impl CommandProcessor {
                 } else {
                     CommandResult::RedisError(String::from("Failed to subscribe to the channel"))
                 }
+            }
+            RedisCommand::Publish { channel, .. } => {
+                let count = self.pub_sub_manager.get_subscriber_count(channel).await;
+                CommandResult::Integer(count as i64)
             }
         }
     }

@@ -199,6 +199,15 @@ impl Parser {
 
                         Ok(RedisCommand::Subscribe { channel })
                     }
+                    "PUBLISH" => {
+                        if elements.len() != 3 {
+                            return Err(anyhow!("PUBLISH command requires exactly two argument"));
+                        }
+                        let channel = self.extract_string(&elements[1])?;
+                        let message = self.extract_string(&elements[2])?;
+
+                        Ok(RedisCommand::Publish { channel, message })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }
