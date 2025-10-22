@@ -306,7 +306,7 @@ impl CommandProcessor {
                     }
                 }
             }
-            RedisCommand::Blpop { key, timeout: _ } => {
+            RedisCommand::Blpop { key, timeout } => {
                 if let Some(elements) = self.storage.lpop(key.clone(), Some(1)).await {
                     return CommandResult::Array(vec![
                         CommandResult::Value(Some(key)),
@@ -315,7 +315,12 @@ impl CommandProcessor {
                 }
 
                 self.blocking_list_manager
-                    .register_waiting_client(key, self.client_id, self.blocking_tx.clone())
+                    .register_waiting_client(
+                        key,
+                        self.client_id,
+                        self.blocking_tx.clone(),
+                        timeout as f64,
+                    )
                     .await;
 
                 CommandResult::Blocked

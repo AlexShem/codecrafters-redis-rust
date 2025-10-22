@@ -7,7 +7,7 @@ mod redis_response;
 mod storage;
 mod types;
 
-use crate::blocking_list::BlockingListManager;
+use crate::blocking_list::{BlockedListResponse, BlockingListManager};
 use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;
 use crate::pubsub::{ClientId, PubSubManager};
@@ -16,6 +16,7 @@ use crate::redis_response::RedisResponse;
 use crate::storage::Storage;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -65,6 +66,16 @@ async fn handle_connection(
     let (blocking_tx, mut blocking_rx) = tokio::sync::mpsc::unbounded_channel();
 
     pub_sub_manager.register_client(client_id, tx).await;
+
+    let blocking_list_manager_clone = blocking_list_manager.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
+        loop {
+            interval.tick().await;
+            blocking_list_manager_clone.check_timeout().await;
+        }
+    });
 
     let (read_half, mut write_half) = stream.split();
     let mut reader = tokio::io::BufReader::new(read_half);
@@ -128,13 +139,25 @@ async fn handle_connection(
             }
 
             Some(blocked_response) = blocking_rx.recv() => {
-                use crate::redis_command::CommandResult;
-                let result = CommandResult::Array(vec![
-                    CommandResult::Value(Some(blocked_response.list_key)),
-                    CommandResult::Value(Some(blocked_response.element))
-                ]);
-                let response = RedisResponse::from_result(result);
-                write_half.write_all(response.to_bytes()).await.unwrap();
+                match blocked_response {
+                    BlockedListResponse::Element{ list_key, element } => {
+                        let response = RedisResponse::from_result(CommandResult::Array(vec![
+                            CommandResult::Value(Some(list_key)),
+                            CommandResult::Value(Some(element))
+                        ]));
+                        if let Err(e) = write_half.write_all(response.to_bytes()).await {
+                            eprintln!("Failed to write BLPOP response: {}", e);
+                            break;
+                        }
+                    }
+                    BlockedListResponse::Timeout{ .. } => {
+                        let response = b"*-1\r\n";
+                        if let Err(e) = write_half.write_all(response).await {
+                            eprintln!("Failed to write timeout response: {}", e);
+                            break;
+                        }
+                    }
+                }
             }
         }
     }

@@ -248,7 +248,6 @@ impl Storage {
     pub async fn lpop(&self, key: String, count: Option<usize>) -> Option<Vec<String>> {
         let mut lists = self.lists.write().await;
         if let Some(list) = lists.get_mut(&key) {
-            println!("Before lpoping: {:?}", &list);
             let popped_elements: Vec<String> = match count {
                 None => vec![lists
                     .get_mut(&key)
@@ -264,7 +263,6 @@ impl Storage {
                     popped
                 }
             };
-            println!("Popped elements after lpop'ing: {:?}", popped_elements);
             Some(popped_elements)
         } else {
             None

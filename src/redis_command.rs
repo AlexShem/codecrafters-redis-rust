@@ -79,8 +79,7 @@ pub enum RedisCommand {
     },
     Blpop {
         key: String,
-        #[allow(unused)]
-        timeout: u64,
+        timeout: f64,
     },
 }
 
