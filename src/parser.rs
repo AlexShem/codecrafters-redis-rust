@@ -293,6 +293,18 @@ impl Parser {
                         let timeout: f64 = self.extract_string(&elements[2])?.parse()?;
                         Ok(RedisCommand::Blpop { key, timeout })
                     }
+                    "GEOADD" => {
+                        let key = "places".to_string();
+                        let longitude = 0.0;
+                        let latitude = 0.0;
+                        let member = "London".to_string();
+                        Ok(RedisCommand::Geoadd {
+                            key,
+                            longitude,
+                            latitude,
+                            member,
+                        })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

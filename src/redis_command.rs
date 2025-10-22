@@ -81,6 +81,13 @@ pub enum RedisCommand {
         key: String,
         timeout: f64,
     },
+    #[allow(unused)]
+    Geoadd {
+        key: String,
+        longitude: f64,
+        latitude: f64,
+        member: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +133,7 @@ impl Display for RedisCommand {
             RedisCommand::Llen { .. } => f.write_str("LLEN"),
             RedisCommand::Lpop { .. } => f.write_str("LPOP"),
             RedisCommand::Blpop { .. } => f.write_str("BLPOP"),
+            RedisCommand::Geoadd { .. } => f.write_str("GEOADD"),
         }
     }
 }

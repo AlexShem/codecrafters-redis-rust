@@ -325,6 +325,7 @@ impl CommandProcessor {
 
                 CommandResult::Blocked
             }
+            RedisCommand::Geoadd { .. } => CommandResult::Integer(1),
         }
     }
 }
