@@ -326,10 +326,10 @@ impl CommandProcessor {
                 CommandResult::Blocked
             }
             RedisCommand::Geoadd {
-                key: _,
+                key,
                 longitude,
                 latitude,
-                member: _,
+                member,
             } => {
                 // Validate longitude and latitude
                 let valid_longitude = longitude <= 180.0 && longitude >= -180.0;
@@ -341,6 +341,7 @@ impl CommandProcessor {
                         longitude, latitude
                     ))
                 } else {
+                    self.storage.zadd(key, 0.0, member).await;
                     CommandResult::Integer(1)
                 }
             }
