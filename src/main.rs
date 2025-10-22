@@ -1,3 +1,4 @@
+mod blocking_list;
 mod command_processor;
 mod parser;
 mod pubsub;
@@ -6,10 +7,11 @@ mod redis_response;
 mod storage;
 mod types;
 
+use crate::blocking_list::BlockingListManager;
 use crate::command_processor::CommandProcessor;
 use crate::parser::Parser;
 use crate::pubsub::{ClientId, PubSubManager};
-use crate::redis_command::RedisCommand;
+use crate::redis_command::{CommandResult, RedisCommand};
 use crate::redis_response::RedisResponse;
 use crate::storage::Storage;
 use std::path::PathBuf;
@@ -31,14 +33,23 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
     let storage = Storage::new(file_path, dir, dbfilename).await;
     let pub_sub_manager = PubSubManager::new();
+    let blocking_list_manager = BlockingListManager::new();
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
         let storage_clone = storage.clone();
         let pub_sub_manager_clone = pub_sub_manager.clone();
+        let blocking_list_manager_clone = blocking_list_manager.clone();
         let client_id = CLIENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
         tokio::spawn(async move {
-            handle_connection(stream, storage_clone, pub_sub_manager_clone, client_id).await;
+            handle_connection(
+                stream,
+                storage_clone,
+                pub_sub_manager_clone,
+                blocking_list_manager_clone,
+                client_id,
+            )
+            .await;
         });
     }
 }
@@ -47,16 +58,24 @@ async fn handle_connection(
     mut stream: TcpStream,
     storage: Storage,
     pub_sub_manager: PubSubManager,
+    blocking_list_manager: BlockingListManager,
     client_id: ClientId,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (blocking_tx, mut blocking_rx) = tokio::sync::mpsc::unbounded_channel();
+
     pub_sub_manager.register_client(client_id, tx).await;
 
     let (read_half, mut write_half) = stream.split();
     let mut reader = tokio::io::BufReader::new(read_half);
 
-    let mut processor = CommandProcessor::new(storage, pub_sub_manager.clone(), client_id);
-
+    let mut processor = CommandProcessor::new(
+        storage,
+        pub_sub_manager.clone(),
+        blocking_list_manager,
+        client_id,
+        blocking_tx,
+    );
     loop {
         tokio::select! {
             // Handle incoming commands from the client
@@ -83,8 +102,11 @@ async fn handle_connection(
                         };
 
                         let result = processor.execute(command).await;
-                        let response = RedisResponse::from_result(result);
-                        write_half.write_all(response.to_bytes()).await.unwrap();
+
+                        if !matches!(result, CommandResult::Blocked) {
+                            let response = RedisResponse::from_result(result);
+                            write_half.write_all(response.to_bytes()).await.unwrap();
+                        }
                     }
                     Err(e) => {
                         println!("Failed to read from connection: {}", e);
@@ -102,6 +124,16 @@ async fn handle_connection(
                     CommandResult::Value(Some(pub_sub_msg.message)),
                 ]);
                 let response = RedisResponse::from_result(message_result);
+                write_half.write_all(response.to_bytes()).await.unwrap();
+            }
+
+            Some(blocked_response) = blocking_rx.recv() => {
+                use crate::redis_command::CommandResult;
+                let result = CommandResult::Array(vec![
+                    CommandResult::Value(Some(blocked_response.list_key)),
+                    CommandResult::Value(Some(blocked_response.element))
+                ]);
+                let response = RedisResponse::from_result(result);
                 write_half.write_all(response.to_bytes()).await.unwrap();
             }
         }

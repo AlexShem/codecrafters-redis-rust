@@ -1,6 +1,8 @@
+use crate::blocking_list::{BlockedListResponse, BlockingListManager};
 use crate::pubsub::{is_command_allowed_in_subscribe_mode, ClientId, PubSubClient, PubSubManager};
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub struct CommandProcessor {
     storage: Storage,
@@ -8,6 +10,9 @@ pub struct CommandProcessor {
     pub_sub_manager: PubSubManager,
     pub_sub_client: PubSubClient,
     pub_sub_state: PubSubState,
+    blocking_list_manager: BlockingListManager,
+    blocking_tx: UnboundedSender<BlockedListResponse>,
+    client_id: ClientId,
 }
 
 #[derive(Default)]
@@ -22,13 +27,22 @@ struct PubSubState {
 }
 
 impl CommandProcessor {
-    pub fn new(storage: Storage, pub_sub_manager: PubSubManager, client_id: ClientId) -> Self {
+    pub fn new(
+        storage: Storage,
+        pub_sub_manager: PubSubManager,
+        blocking_list_manager: BlockingListManager,
+        client_id: ClientId,
+        blocking_tx: UnboundedSender<BlockedListResponse>,
+    ) -> Self {
         Self {
             storage,
             tx_state: TransactionState::default(),
             pub_sub_manager,
             pub_sub_client: PubSubClient::new(client_id),
             pub_sub_state: PubSubState::default(),
+            blocking_list_manager,
+            blocking_tx,
+            client_id,
         }
     }
 
@@ -241,7 +255,16 @@ impl CommandProcessor {
                 CommandResult::Integer(count as i64)
             }
             RedisCommand::Rpush { list, elements } => {
-                let list_len = self.storage.rpush(list, elements).await;
+                let (list_len, was_empty) = self.storage.rpush(list.clone(), elements).await;
+
+                if was_empty && self.blocking_list_manager.has_waiting_clients(&list).await {
+                    if let Some(popped) = self.storage.lpop(list.clone(), Some(1)).await {
+                        self.blocking_list_manager
+                            .notify_next_waiting_client(&list, popped[0].clone())
+                            .await;
+                    }
+                }
+
                 CommandResult::Integer(list_len as i64)
             }
             RedisCommand::Lrange { key, start, end } => {
@@ -282,6 +305,20 @@ impl CommandProcessor {
                         }
                     }
                 }
+            }
+            RedisCommand::Blpop { key, timeout: _ } => {
+                if let Some(elements) = self.storage.lpop(key.clone(), Some(1)).await {
+                    return CommandResult::Array(vec![
+                        CommandResult::Value(Some(key)),
+                        CommandResult::Value(Some(elements[0].clone())),
+                    ]);
+                }
+
+                self.blocking_list_manager
+                    .register_waiting_client(key, self.client_id, self.blocking_tx.clone())
+                    .await;
+
+                CommandResult::Blocked
             }
         }
     }

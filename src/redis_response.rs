@@ -44,6 +44,9 @@ impl RedisResponse {
                 );
                 response.into_bytes()
             }
+            CommandResult::Blocked => {
+                panic!("Blocked result should not be converted to response")
+            }
         };
         Self { data }
     }

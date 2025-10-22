@@ -77,6 +77,11 @@ pub enum RedisCommand {
         key: String,
         count: Option<usize>,
     },
+    Blpop {
+        key: String,
+        #[allow(unused)]
+        timeout: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +95,7 @@ pub enum CommandResult {
     Array(Vec<CommandResult>),
     RedisError(String),
     ConfigValue(String, String),
+    Blocked,
 }
 
 impl Display for RedisCommand {
@@ -120,6 +126,7 @@ impl Display for RedisCommand {
             RedisCommand::Lpush { .. } => f.write_str("LPUSH"),
             RedisCommand::Llen { .. } => f.write_str("LLEN"),
             RedisCommand::Lpop { .. } => f.write_str("LPOP"),
+            RedisCommand::Blpop { .. } => f.write_str("BLPOP"),
         }
     }
 }

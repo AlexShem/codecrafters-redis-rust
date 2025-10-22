@@ -285,6 +285,14 @@ impl Parser {
 
                         Ok(RedisCommand::Lpop { key, count })
                     }
+                    "BLPOP" => {
+                        if elements.len() != 3 {
+                            return Err(anyhow!("BLPOP command requires exactly two arguments"));
+                        }
+                        let key = self.extract_string(&elements[1])?;
+                        let timeout: u64 = self.extract_string(&elements[2])?.parse()?;
+                        Ok(RedisCommand::Blpop { key, timeout })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

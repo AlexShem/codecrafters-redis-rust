@@ -186,13 +186,14 @@ impl Storage {
         }
     }
 
-    pub async fn rpush(&mut self, list: String, elements: Vec<String>) -> usize {
+    pub async fn rpush(&mut self, list: String, elements: Vec<String>) -> (usize, bool) {
         let mut lists = self.lists.write().await;
+        let was_empty = !lists.contains_key(&list) || lists[&list].is_empty();
         lists
             .entry(list.clone())
             .or_insert_with(VecDeque::new)
             .append(&mut VecDeque::from(elements));
-        lists[&list].len()
+        (lists[&list].len(), was_empty)
     }
 
     pub async fn lpush(&mut self, list: String, elements: Vec<String>) -> usize {
@@ -247,6 +248,7 @@ impl Storage {
     pub async fn lpop(&self, key: String, count: Option<usize>) -> Option<Vec<String>> {
         let mut lists = self.lists.write().await;
         if let Some(list) = lists.get_mut(&key) {
+            println!("Before lpoping: {:?}", &list);
             let popped_elements: Vec<String> = match count {
                 None => vec![lists
                     .get_mut(&key)
@@ -262,6 +264,7 @@ impl Storage {
                     popped
                 }
             };
+            println!("Popped elements after lpop'ing: {:?}", popped_elements);
             Some(popped_elements)
         } else {
             None
