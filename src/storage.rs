@@ -195,6 +195,15 @@ impl Storage {
         lists[&list].len()
     }
 
+    pub async fn lpush(&mut self, list: String, elements: Vec<String>) -> usize {
+        let mut lists = self.lists.write().await;
+        let old_elements = lists.entry(list.clone()).or_insert_with(Vec::new);
+        for element in elements {
+            old_elements.insert(0, element);
+        }
+        lists[&list].len()
+    }
+
     pub async fn lrange(&self, key: String, start: i32, end: i32) -> Option<Vec<String>> {
         let lists = self.lists.read().await;
         if let Some(list) = lists.get(&key) {

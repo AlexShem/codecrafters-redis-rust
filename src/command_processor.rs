@@ -255,6 +255,10 @@ impl CommandProcessor {
                     CommandResult::Array(vec![])
                 }
             }
+            RedisCommand::Lpush { list, elements } => {
+                let list_len = self.storage.lpush(list, elements).await;
+                CommandResult::Integer(list_len as i64)
+            }
         }
     }
 }

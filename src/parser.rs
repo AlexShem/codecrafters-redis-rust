@@ -244,6 +244,22 @@ impl Parser {
 
                         Ok(RedisCommand::Lrange { key, start, end })
                     }
+                    "LPUSH" => {
+                        if elements.len() <= 2 {
+                            return Err(anyhow!("LPUSH command requires at least two arguments"));
+                        }
+
+                        let list = self.extract_string(&elements[1])?;
+                        let mut list_elements = Vec::new();
+                        for element in &elements[2..] {
+                            list_elements.push(self.extract_string(element)?);
+                        }
+
+                        Ok(RedisCommand::Lpush {
+                            list,
+                            elements: list_elements,
+                        })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

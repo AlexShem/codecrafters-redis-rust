@@ -66,6 +66,10 @@ pub enum RedisCommand {
         start: i32,
         end: i32,
     },
+    Lpush {
+        list: String,
+        elements: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +110,7 @@ impl Display for RedisCommand {
             RedisCommand::Publish { .. } => f.write_str("PUBLISH"),
             RedisCommand::Rpush { .. } => f.write_str("RPUSH"),
             RedisCommand::Lrange { .. } => f.write_str("LRANGE"),
+            RedisCommand::Lpush { .. } => f.write_str("LPUSH"),
         }
     }
 }
