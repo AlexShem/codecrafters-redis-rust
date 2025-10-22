@@ -211,12 +211,29 @@ impl Parser {
                     }
                     "PUBLISH" => {
                         if elements.len() != 3 {
-                            return Err(anyhow!("PUBLISH command requires exactly two argument"));
+                            return Err(anyhow!("PUBLISH command requires exactly two arguments"));
                         }
                         let channel = self.extract_string(&elements[1])?;
                         let message = self.extract_string(&elements[2])?;
 
                         Ok(RedisCommand::Publish { channel, message })
+                    }
+                    "RPUSH" => {
+                        println!("{:?}", elements);
+                        if elements.len() <= 2 {
+                            return Err(anyhow!("RPUSH command requires at least two arguments"));
+                        }
+
+                        let list = self.extract_string(&elements[1])?;
+                        let mut list_elements = Vec::new();
+                        for element in &elements[2..] {
+                            list_elements.push(self.extract_string(element)?);
+                        }
+
+                        Ok(RedisCommand::Rpush {
+                            list,
+                            elements: list_elements,
+                        })
                     }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }

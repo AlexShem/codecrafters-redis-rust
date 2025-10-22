@@ -57,6 +57,10 @@ pub enum RedisCommand {
         channel: String,
         message: String,
     },
+    Rpush {
+        list: String,
+        elements: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +99,7 @@ impl Display for RedisCommand {
             RedisCommand::Subscribe { .. } => f.write_str("SUBSCRIBE"),
             RedisCommand::Unsubscribe { .. } => f.write_str("UNSUBSCRIBE"),
             RedisCommand::Publish { .. } => f.write_str("PUBLISH"),
+            RedisCommand::Rpush { .. } => f.write_str("RPUSH"),
         }
     }
 }

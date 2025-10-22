@@ -220,7 +220,9 @@ impl CommandProcessor {
             RedisCommand::Unsubscribe { channel } => {
                 let _ = self.pub_sub_client.unsubscribe(&channel);
                 let client_id = self.pub_sub_client.client_id();
-                self.pub_sub_manager.unsubscribe(client_id, channel.clone()).await;
+                self.pub_sub_manager
+                    .unsubscribe(client_id, channel.clone())
+                    .await;
 
                 let count = self.pub_sub_client.count();
 
@@ -237,6 +239,10 @@ impl CommandProcessor {
             RedisCommand::Publish { channel, message } => {
                 let count = self.pub_sub_manager.publish(channel, message).await;
                 CommandResult::Integer(count as i64)
+            }
+            RedisCommand::Rpush { list, elements } => {
+                let list_len = self.storage.rpush(list, elements).await;
+                CommandResult::Integer(list_len as i64)
             }
         }
     }

@@ -16,6 +16,7 @@ pub struct Storage {
     data: Arc<RwLock<HashMap<String, StoredValue>>>,
     /// Sorted sets, stored as set name `String` and the `SortedSet`.
     sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
+    lists: Arc<RwLock<HashMap<String, Vec<String>>>>,
     #[allow(unused)]
     file_path: Option<PathBuf>,
     dir: Option<String>,
@@ -49,6 +50,7 @@ impl Storage {
                 Ok(data) => Self {
                     data: Arc::new(RwLock::new(data)),
                     sorted_sets: Arc::new(RwLock::new(HashMap::new())),
+                    lists: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
@@ -56,6 +58,7 @@ impl Storage {
                 Err(_) => Self {
                     data: Arc::new(RwLock::new(HashMap::new())),
                     sorted_sets: Arc::new(RwLock::new(HashMap::new())),
+                    lists: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
@@ -65,6 +68,7 @@ impl Storage {
             Self {
                 data: Arc::new(RwLock::new(HashMap::new())),
                 sorted_sets: Arc::new(RwLock::new(HashMap::new())),
+                lists: Arc::new(RwLock::new(HashMap::new())),
                 file_path,
                 dir,
                 dbfilename,
@@ -181,6 +185,15 @@ impl Storage {
             None
         }
     }
+
+    pub async fn rpush(&mut self, list: String, mut elements: Vec<String>) -> usize {
+        let mut lists = self.lists.write().await;
+        lists
+            .entry(list.clone())
+            .or_insert_with(Vec::new)
+            .append(&mut elements);
+        lists[&list].len()
+    }
 }
 
 impl StoredValue {
@@ -290,7 +303,7 @@ impl SortedSet {
     }
 
     fn zrem(&mut self, member: String) -> Option<usize> {
-        if let Some(score) =self.by_member.remove(&member) {
+        if let Some(score) = self.by_member.remove(&member) {
             let old = ScoredMember {
                 score,
                 member: member.clone(),
