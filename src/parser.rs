@@ -199,6 +199,16 @@ impl Parser {
 
                         Ok(RedisCommand::Subscribe { channel })
                     }
+                    "UNSUBSCRIBE" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!(
+                                "UNSUBSCRIBE command requires exactly one argument"
+                            ));
+                        }
+                        let channel = self.extract_string(&elements[1])?;
+
+                        Ok(RedisCommand::Unsubscribe { channel })
+                    }
                     "PUBLISH" => {
                         if elements.len() != 3 {
                             return Err(anyhow!("PUBLISH command requires exactly two argument"));

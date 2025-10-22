@@ -49,6 +49,17 @@ impl PubSubManager {
             .insert(client_id);
     }
 
+    pub async fn unsubscribe(&self, client_id: ClientId, channel: String) {
+        let mut channels = self.channels.write().await;
+        if let Some(target_channel) = channels.get_mut(&channel) {
+            target_channel.remove(&client_id);
+            
+            if target_channel.is_empty() {
+                channels.remove(&channel);
+            }
+        }
+    }
+
     pub async fn publish(&self, channel: String, message: String) -> usize {
         let channels = self.channels.read().await;
         let subscribers = match channels.get(&channel) {
@@ -92,6 +103,10 @@ impl PubSubClient {
         self.channels.insert(channel.clone())
     }
 
+    pub fn unsubscribe(&mut self, channel: &String) -> bool {
+        self.channels.remove(channel)
+    }
+
     pub fn count(&self) -> usize {
         self.channels.len()
     }
@@ -102,5 +117,8 @@ impl PubSubClient {
 }
 
 pub fn is_command_allowed_in_subscribe_mode(command: &RedisCommand) -> bool {
-    matches!(command, RedisCommand::Subscribe { .. } | RedisCommand::Ping)
+    matches!(
+        command,
+        RedisCommand::Subscribe { .. } | RedisCommand::Ping | RedisCommand::Unsubscribe { .. }
+    )
 }

@@ -83,6 +83,7 @@ impl CommandProcessor {
                         return CommandResult::RedisError(format!("Can't execute '{}'", other));
                     }
                 }
+
                 self.execute_primitive(other).await
             }
         }
@@ -215,6 +216,23 @@ impl CommandProcessor {
                 } else {
                     CommandResult::RedisError(String::from("Failed to subscribe to the channel"))
                 }
+            }
+            RedisCommand::Unsubscribe { channel } => {
+                let _ = self.pub_sub_client.unsubscribe(&channel);
+                let client_id = self.pub_sub_client.client_id();
+                self.pub_sub_manager.unsubscribe(client_id, channel.clone()).await;
+
+                let count = self.pub_sub_client.count();
+
+                if count == 0 {
+                    self.pub_sub_state.active = false;
+                }
+
+                CommandResult::Array(vec![
+                    CommandResult::Value(Some(String::from("unsubscribe"))),
+                    CommandResult::Value(Some(channel)),
+                    CommandResult::Integer(count as i64),
+                ])
             }
             RedisCommand::Publish { channel, message } => {
                 let count = self.pub_sub_manager.publish(channel, message).await;
