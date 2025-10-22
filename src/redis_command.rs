@@ -52,7 +52,6 @@ pub enum RedisCommand {
     },
     Publish {
         channel: String,
-        #[allow(unused)]
         message: String,
     },
 }

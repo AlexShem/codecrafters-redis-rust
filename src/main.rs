@@ -49,37 +49,65 @@ async fn handle_connection(
     pub_sub_manager: PubSubManager,
     client_id: ClientId,
 ) {
-    let mut processor = CommandProcessor::new(storage, pub_sub_manager, client_id);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    pub_sub_manager.register_client(client_id, tx).await;
+
+    let (read_half, mut write_half) = stream.split();
+    let mut reader = tokio::io::BufReader::new(read_half);
+
+    let mut processor = CommandProcessor::new(storage, pub_sub_manager.clone(), client_id);
 
     loop {
-        let mut buf = [0; 512];
-        match stream.read(&mut buf).await {
-            Ok(0) => {
-                println!("Connection closed by client");
-                break;
-            }
-            Ok(bytes_read) => {
-                let command_bytes = bytes::Bytes::copy_from_slice(&buf[..bytes_read]);
-                let parser = Parser::new();
-
-                let command: RedisCommand = match parser.parse_command(command_bytes) {
-                    Ok(cmd) => cmd,
-                    Err(e) => {
-                        eprintln!("Parse error: {}", e);
-                        continue;
+        tokio::select! {
+            // Handle incoming commands from the client
+            result = async {
+                let mut buf = [0; 512];
+                let bytes_read = reader.read(&mut buf).await?;
+                Ok::<(usize, [u8; 512]), std::io::Error>((bytes_read, buf))
+            } => {
+                match result {
+                    Ok((0, _)) => {
+                        println!("Connection closed by client");
+                        break;
                     }
-                };
+                    Ok((bytes_read, buf)) => {
+                        let command_bytes = bytes::Bytes::copy_from_slice(&buf[..bytes_read]);
+                        let parser = Parser::new();
 
-                let result = processor.execute(command).await;
-                let response = RedisResponse::from_result(result);
-                stream.write_all(response.to_bytes()).await.unwrap();
+                        let command: RedisCommand = match parser.parse_command(command_bytes) {
+                            Ok(cmd) => cmd,
+                            Err(e) => {
+                                eprintln!("Parse error: {}", e);
+                                continue;
+                            }
+                        };
+
+                        let result = processor.execute(command).await;
+                        let response = RedisResponse::from_result(result);
+                        write_half.write_all(response.to_bytes()).await.unwrap();
+                    }
+                    Err(e) => {
+                        println!("Failed to read from connection: {}", e);
+                        break;
+                    }
+                }
             }
-            Err(e) => {
-                println!("Failed to read from connection: {}", e);
-                break;
+
+            // Handle pub/sub messages
+            Some(pub_sub_msg) = rx.recv() => {
+                use crate::redis_command::CommandResult;
+                let message_result = CommandResult::Array(vec![
+                    CommandResult::Value(Some(String::from("message"))),
+                    CommandResult::Value(Some(pub_sub_msg.channel)),
+                    CommandResult::Value(Some(pub_sub_msg.message)),
+                ]);
+                let response = RedisResponse::from_result(message_result);
+                write_half.write_all(response.to_bytes()).await.unwrap();
             }
         }
     }
+
+    pub_sub_manager.unregister_client(client_id).await;
 }
 
 fn parse_args() -> (Option<String>, Option<String>) {

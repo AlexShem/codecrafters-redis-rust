@@ -216,8 +216,8 @@ impl CommandProcessor {
                     CommandResult::RedisError(String::from("Failed to subscribe to the channel"))
                 }
             }
-            RedisCommand::Publish { channel, .. } => {
-                let count = self.pub_sub_manager.get_subscriber_count(channel).await;
+            RedisCommand::Publish { channel, message } => {
+                let count = self.pub_sub_manager.publish(channel, message).await;
                 CommandResult::Integer(count as i64)
             }
         }
