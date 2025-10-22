@@ -266,7 +266,23 @@ impl CommandProcessor {
                     CommandResult::Integer(0)
                 }
             }
-            RedisCommand::Lpop { key } => CommandResult::Value(self.storage.lpop(key).await),
+            RedisCommand::Lpop { key, count } => {
+                let elements = self.storage.lpop(key, count).await;
+                match elements {
+                    None => CommandResult::Value(None),
+                    Some(list) => {
+                        if list.len() == 1 {
+                            CommandResult::Value(Some(list[0].clone()))
+                        } else {
+                            let list_of_elements = list
+                                .iter()
+                                .map(|el| CommandResult::Value(Some(el.clone())))
+                                .collect();
+                            CommandResult::Array(list_of_elements)
+                        }
+                    }
+                }
+            }
         }
     }
 }

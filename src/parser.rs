@@ -269,12 +269,21 @@ impl Parser {
                         Ok(RedisCommand::Llen { key })
                     }
                     "LPOP" => {
-                        if elements.len() != 2 {
-                            return Err(anyhow!("LPOP command requires exactly one argument"));
+                        if elements.len() > 3 || elements.len() == 1 {
+                            return Err(anyhow!("LPOP command requires one or two arguments"));
                         }
                         let key = self.extract_string(&elements[1])?;
+                        let count: Option<usize> = if elements.len() == 3 {
+                            let amount = self.extract_string(&elements[2])?.parse::<i32>()?;
+                            if amount.is_negative() {
+                                return Err(anyhow!("LPOP expects non-negative nuumber of pops"));
+                            }
+                            Some(amount as usize)
+                        } else {
+                            None
+                        };
 
-                        Ok(RedisCommand::Lpop { key })
+                        Ok(RedisCommand::Lpop { key, count })
                     }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }

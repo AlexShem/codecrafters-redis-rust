@@ -75,7 +75,8 @@ pub enum RedisCommand {
     },
     Lpop {
         key: String,
-    }
+        count: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]

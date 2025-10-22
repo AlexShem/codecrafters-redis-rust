@@ -244,11 +244,28 @@ impl Storage {
         list.get(&key).and_then(|elements| Some(elements.len()))
     }
 
-    pub async fn lpop(&self, key: String) -> Option<String> {
+    pub async fn lpop(&self, key: String, count: Option<usize>) -> Option<Vec<String>> {
         let mut lists = self.lists.write().await;
-        lists
-            .get_mut(&key)
-            .and_then(|elements| elements.pop_front())
+        if let Some(list) = lists.get_mut(&key) {
+            let popped_elements: Vec<String> = match count {
+                None => vec![lists
+                    .get_mut(&key)
+                    .and_then(|elements| elements.pop_front())?],
+                Some(amount) => {
+                    let amount = amount.min(list.len());
+                    let mut count = 0;
+                    let mut popped = Vec::with_capacity(amount);
+                    while count < amount {
+                        popped.push(list.pop_front().unwrap());
+                        count += 1;
+                    }
+                    popped
+                }
+            };
+            Some(popped_elements)
+        } else {
+            None
+        }
     }
 }
 
