@@ -61,6 +61,11 @@ pub enum RedisCommand {
         list: String,
         elements: Vec<String>,
     },
+    Lrange {
+        key: String,
+        start: i32,
+        end: i32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +105,7 @@ impl Display for RedisCommand {
             RedisCommand::Unsubscribe { .. } => f.write_str("UNSUBSCRIBE"),
             RedisCommand::Publish { .. } => f.write_str("PUBLISH"),
             RedisCommand::Rpush { .. } => f.write_str("RPUSH"),
+            RedisCommand::Lrange { .. } => f.write_str("LRANGE"),
         }
     }
 }

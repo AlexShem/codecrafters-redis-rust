@@ -194,6 +194,41 @@ impl Storage {
             .append(&mut elements);
         lists[&list].len()
     }
+
+    pub async fn lrange(&self, key: String, start: i32, end: i32) -> Option<Vec<String>> {
+        let lists = self.lists.read().await;
+        if let Some(list) = lists.get(&key) {
+            let members_size = list.len() as i32;
+
+            let (start, end) = match (start.is_negative(), end.is_negative()) {
+                (false, false) => (start, end),
+                (false, true) => (start, members_size + end),
+                (true, false) => (members_size + start, end),
+                (true, true) => (members_size + start, members_size + end),
+            };
+
+            if start >= members_size || start > end {
+                return None;
+            }
+
+            let first = start.max(0);
+            let last = end.min(members_size);
+            let members: Vec<String> = list
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, element)| {
+                    if first <= idx as i32 && idx as i32 <= last {
+                        Some(element.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            Some(members)
+        } else {
+            None
+        }
+    }
 }
 
 impl StoredValue {

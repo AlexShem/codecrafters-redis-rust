@@ -219,7 +219,6 @@ impl Parser {
                         Ok(RedisCommand::Publish { channel, message })
                     }
                     "RPUSH" => {
-                        println!("{:?}", elements);
                         if elements.len() <= 2 {
                             return Err(anyhow!("RPUSH command requires at least two arguments"));
                         }
@@ -234,6 +233,16 @@ impl Parser {
                             list,
                             elements: list_elements,
                         })
+                    }
+                    "LRANGE" => {
+                        if elements.len() != 4 {
+                            return Err(anyhow!("LRANGE command requires exactly three arguments"));
+                        }
+                        let key = self.extract_string(&elements[1])?;
+                        let start: i32 = self.extract_string(&elements[2])?.parse()?;
+                        let end: i32 = self.extract_string(&elements[3])?.parse()?;
+
+                        Ok(RedisCommand::Lrange { key, start, end })
                     }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
