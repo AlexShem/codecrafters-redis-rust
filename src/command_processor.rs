@@ -259,6 +259,13 @@ impl CommandProcessor {
                 let list_len = self.storage.lpush(list, elements).await;
                 CommandResult::Integer(list_len as i64)
             }
+            RedisCommand::Llen { key } => {
+                if let Some(cardinality) = self.storage.llen(key).await {
+                    CommandResult::Integer(cardinality as i64)
+                } else {
+                    CommandResult::Integer(0)
+                }
+            }
         }
     }
 }

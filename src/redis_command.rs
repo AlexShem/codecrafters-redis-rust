@@ -70,6 +70,9 @@ pub enum RedisCommand {
         list: String,
         elements: Vec<String>,
     },
+    Llen {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +114,7 @@ impl Display for RedisCommand {
             RedisCommand::Rpush { .. } => f.write_str("RPUSH"),
             RedisCommand::Lrange { .. } => f.write_str("LRANGE"),
             RedisCommand::Lpush { .. } => f.write_str("LPUSH"),
+            RedisCommand::Llen { .. } => f.write_str("LLEN"),
         }
     }
 }

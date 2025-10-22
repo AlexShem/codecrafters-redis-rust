@@ -238,6 +238,11 @@ impl Storage {
             None
         }
     }
+
+    pub async fn llen(&self, key: String) -> Option<usize> {
+        let list = self.lists.read().await;
+        list.get(&key).and_then(|elements| Some(elements.len()))
+    }
 }
 
 impl StoredValue {
