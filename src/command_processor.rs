@@ -71,6 +71,12 @@ impl CommandProcessor {
                 }
 
                 if self.pub_sub_state.active {
+                    if matches!(other, RedisCommand::Ping) {
+                        return CommandResult::Array(vec![
+                            CommandResult::Value(Some(String::from("pong"))),
+                            CommandResult::Value(Some(String::new())),
+                        ]);
+                    }
                     if !is_command_allowed_in_subscribe_mode(&other) {
                         return CommandResult::RedisError(format!("Can't execute '{}'", other));
                     }
