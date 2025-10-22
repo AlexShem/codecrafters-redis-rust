@@ -73,6 +73,9 @@ pub enum RedisCommand {
     Llen {
         key: String,
     },
+    Lpop {
+        key: String,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,7 @@ impl Display for RedisCommand {
             RedisCommand::Lrange { .. } => f.write_str("LRANGE"),
             RedisCommand::Lpush { .. } => f.write_str("LPUSH"),
             RedisCommand::Llen { .. } => f.write_str("LLEN"),
+            RedisCommand::Lpop { .. } => f.write_str("LPOP"),
         }
     }
 }

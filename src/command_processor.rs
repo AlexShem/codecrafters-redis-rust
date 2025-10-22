@@ -244,7 +244,7 @@ impl CommandProcessor {
                 let list_len = self.storage.rpush(list, elements).await;
                 CommandResult::Integer(list_len as i64)
             }
-            RedisCommand::Lrange {key,start,end} => {
+            RedisCommand::Lrange { key, start, end } => {
                 if let Some(members) = self.storage.lrange(key, start, end).await {
                     let mut values = Vec::with_capacity(members.len());
                     for member in members {
@@ -266,6 +266,7 @@ impl CommandProcessor {
                     CommandResult::Integer(0)
                 }
             }
+            RedisCommand::Lpop { key } => CommandResult::Value(self.storage.lpop(key).await),
         }
     }
 }

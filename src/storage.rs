@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +16,7 @@ pub struct Storage {
     data: Arc<RwLock<HashMap<String, StoredValue>>>,
     /// Sorted sets, stored as set name `String` and the `SortedSet`.
     sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
-    lists: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    lists: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
     #[allow(unused)]
     file_path: Option<PathBuf>,
     dir: Option<String>,
@@ -186,18 +186,18 @@ impl Storage {
         }
     }
 
-    pub async fn rpush(&mut self, list: String, mut elements: Vec<String>) -> usize {
+    pub async fn rpush(&mut self, list: String, elements: Vec<String>) -> usize {
         let mut lists = self.lists.write().await;
         lists
             .entry(list.clone())
-            .or_insert_with(Vec::new)
-            .append(&mut elements);
+            .or_insert_with(VecDeque::new)
+            .append(&mut VecDeque::from(elements));
         lists[&list].len()
     }
 
     pub async fn lpush(&mut self, list: String, elements: Vec<String>) -> usize {
         let mut lists = self.lists.write().await;
-        let old_elements = lists.entry(list.clone()).or_insert_with(Vec::new);
+        let old_elements = lists.entry(list.clone()).or_insert_with(VecDeque::new);
         for element in elements {
             old_elements.insert(0, element);
         }
@@ -242,6 +242,13 @@ impl Storage {
     pub async fn llen(&self, key: String) -> Option<usize> {
         let list = self.lists.read().await;
         list.get(&key).and_then(|elements| Some(elements.len()))
+    }
+
+    pub async fn lpop(&self, key: String) -> Option<String> {
+        let mut lists = self.lists.write().await;
+        lists
+            .get_mut(&key)
+            .and_then(|elements| elements.pop_front())
     }
 }
 
