@@ -325,7 +325,25 @@ impl CommandProcessor {
 
                 CommandResult::Blocked
             }
-            RedisCommand::Geoadd { .. } => CommandResult::Integer(1),
+            RedisCommand::Geoadd {
+                key: _,
+                longitude,
+                latitude,
+                member: _,
+            } => {
+                // Validate longitude and latitude
+                let valid_longitude = longitude <= 180.0 && longitude >= -180.0;
+                let valid_latitude = latitude <= 85.05112878 && latitude >= -85.05112878;
+
+                if !valid_longitude || !valid_latitude {
+                    CommandResult::RedisError(format!(
+                        "invalid longitude,latitude pair {},{}",
+                        longitude, latitude
+                    ))
+                } else {
+                    CommandResult::Integer(1)
+                }
+            }
         }
     }
 }

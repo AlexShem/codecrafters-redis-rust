@@ -294,10 +294,13 @@ impl Parser {
                         Ok(RedisCommand::Blpop { key, timeout })
                     }
                     "GEOADD" => {
-                        let key = "places".to_string();
-                        let longitude = 0.0;
-                        let latitude = 0.0;
-                        let member = "London".to_string();
+                        if elements.len() != 5 {
+                            return Err(anyhow!("GEOADD command requires exactly four arguments"));
+                        }
+                        let key = self.extract_string(&elements[1])?;
+                        let longitude: f64 = self.extract_string(&elements[2])?.parse()?;
+                        let latitude: f64 = self.extract_string(&elements[3])?.parse()?;
+                        let member = self.extract_string(&elements[4])?;
                         Ok(RedisCommand::Geoadd {
                             key,
                             longitude,
