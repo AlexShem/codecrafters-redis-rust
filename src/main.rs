@@ -6,6 +6,7 @@ mod redis_command;
 mod redis_response;
 mod storage;
 mod types;
+mod geospatial;
 
 use crate::blocking_list::{BlockedListResponse, BlockingListManager};
 use crate::command_processor::CommandProcessor;

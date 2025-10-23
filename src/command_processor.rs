@@ -3,6 +3,8 @@ use crate::pubsub::{is_command_allowed_in_subscribe_mode, ClientId, PubSubClient
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
 use tokio::sync::mpsc::UnboundedSender;
+use crate::geospatial;
+use crate::geospatial::{is_valid_latitude, is_valid_longitude};
 
 pub struct CommandProcessor {
     storage: Storage,
@@ -332,16 +334,15 @@ impl CommandProcessor {
                 member,
             } => {
                 // Validate longitude and latitude
-                let valid_longitude = longitude <= 180.0 && longitude >= -180.0;
-                let valid_latitude = latitude <= 85.05112878 && latitude >= -85.05112878;
-
-                if !valid_longitude || !valid_latitude {
+                if !is_valid_longitude(longitude) || !is_valid_latitude(latitude) {
                     CommandResult::RedisError(format!(
                         "invalid longitude,latitude pair {},{}",
                         longitude, latitude
                     ))
                 } else {
-                    self.storage.zadd(key, 0.0, member).await;
+                    // Calculate score
+                    let score = geospatial::encode(latitude, longitude) as f64;
+                    self.storage.zadd(key, score, member).await;
                     CommandResult::Integer(1)
                 }
             }
