@@ -88,6 +88,10 @@ pub enum RedisCommand {
         latitude: f64,
         member: String,
     },
+    Geopos {
+        key: String,
+        positions: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +103,7 @@ pub enum CommandResult {
     Value(Option<String>),
     Integer(i64),
     Array(Vec<CommandResult>),
+    NullArray,
     RedisError(String),
     ConfigValue(String, String),
     Blocked,
@@ -134,6 +139,7 @@ impl Display for RedisCommand {
             RedisCommand::Lpop { .. } => f.write_str("LPOP"),
             RedisCommand::Blpop { .. } => f.write_str("BLPOP"),
             RedisCommand::Geoadd { .. } => f.write_str("GEOADD"),
+            RedisCommand::Geopos { .. } => f.write_str("GEOPOS"),
         }
     }
 }

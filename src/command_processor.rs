@@ -1,10 +1,10 @@
 use crate::blocking_list::{BlockedListResponse, BlockingListManager};
+use crate::geospatial;
+use crate::geospatial::{decode, is_valid_latitude, is_valid_longitude};
 use crate::pubsub::{is_command_allowed_in_subscribe_mode, ClientId, PubSubClient, PubSubManager};
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
 use tokio::sync::mpsc::UnboundedSender;
-use crate::geospatial;
-use crate::geospatial::{is_valid_latitude, is_valid_longitude};
 
 pub struct CommandProcessor {
     storage: Storage,
@@ -345,6 +345,33 @@ impl CommandProcessor {
                     self.storage.zadd(key, score, member).await;
                     CommandResult::Integer(1)
                 }
+            }
+            RedisCommand::Geopos { key, positions } => {
+                let sorted_sets = self.storage.sorted_sets.read().await;
+                if !sorted_sets.contains_key(&key) {
+                    let mut responses = Vec::with_capacity(positions.len());
+                    for _ in positions {
+                        responses.push(CommandResult::NullArray);
+                    }
+                    let response = CommandResult::Array(responses);
+                    return response;
+                }
+
+                let sorted_set = sorted_sets.get(&key).unwrap();
+                let mut responses: Vec<CommandResult> = Vec::with_capacity(positions.len());
+
+                for position in positions {
+                    if let Some(coord) = sorted_set.by_member.get(&position) {
+                        let (lon, lat) = decode(coord.clone());
+                        responses.push(CommandResult::Array(vec![
+                            CommandResult::Value(Some(lon.to_string())),
+                            CommandResult::Value(Some(lat.to_string())),
+                        ]));
+                    } else {
+                        responses.push(CommandResult::NullArray);
+                    }
+                }
+                CommandResult::Array(responses)
             }
         }
     }

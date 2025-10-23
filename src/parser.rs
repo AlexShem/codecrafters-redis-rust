@@ -308,6 +308,20 @@ impl Parser {
                             member,
                         })
                     }
+                    "GEOPOS" => {
+                        if elements.len() < 3 {
+                            return Err(anyhow!(
+                                "GEOPOS command requires at least three arguments"
+                            ));
+                        }
+                        let key = self.extract_string(&elements[1])?;
+                        let positions_size = elements.len() - 2;
+                        let mut positions: Vec<String> = Vec::with_capacity(positions_size);
+                        for i in 0..positions_size {
+                            positions.push(self.extract_string(&elements[2 + i])?);
+                        }
+                        Ok(RedisCommand::Geopos { key, positions })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

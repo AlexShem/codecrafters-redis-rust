@@ -15,7 +15,7 @@ use tokio::time::Instant;
 pub struct Storage {
     data: Arc<RwLock<HashMap<String, StoredValue>>>,
     /// Sorted sets, stored as set name `String` and the `SortedSet`.
-    sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
+    pub sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
     lists: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
     #[allow(unused)]
     file_path: Option<PathBuf>,
@@ -28,8 +28,8 @@ struct StoredValue {
     expires_at: Option<Instant>,
 }
 
-struct SortedSet {
-    by_member: HashMap<String, f64>,
+pub struct SortedSet {
+    pub by_member: HashMap<String, f64>,
     ordered: BTreeSet<ScoredMember>,
 }
 

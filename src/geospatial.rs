@@ -34,6 +34,10 @@ pub fn encode(latitude: f64, longitude: f64) -> u64 {
     interleave(lat_int, lon_int)
 }
 
+pub fn decode(_score: f64) -> (f64, f64) {
+    (0.0, 0.0)
+}
+
 pub fn is_valid_longitude(longitude: f64) -> bool {
     longitude <= MAX_LONGITUDE && longitude >= MIN_LONGITUDE
 }
