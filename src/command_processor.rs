@@ -1,6 +1,6 @@
 use crate::blocking_list::{BlockedListResponse, BlockingListManager};
 use crate::geospatial;
-use crate::geospatial::{decode, is_valid_latitude, is_valid_longitude};
+use crate::geospatial::{decode, distance, is_valid_latitude, is_valid_longitude};
 use crate::pubsub::{is_command_allowed_in_subscribe_mode, ClientId, PubSubClient, PubSubManager};
 use crate::redis_command::{CommandResult, RedisCommand};
 use crate::storage::Storage;
@@ -372,6 +372,27 @@ impl CommandProcessor {
                     }
                 }
                 CommandResult::Array(responses)
+            }
+            RedisCommand::Geodist { key, from, to } => {
+                let sorted_sets = self.storage.sorted_sets.read().await;
+                if !sorted_sets.contains_key(&key) {
+                    return CommandResult::NullArray;
+                }
+
+                let sorted_set = sorted_sets.get(&key).unwrap();
+                if !sorted_set.by_member.contains_key(&from)
+                    || !sorted_set.by_member.contains_key(&to)
+                {
+                    return CommandResult::NullArray;
+                }
+
+                let score_from = sorted_set.by_member.get(&from).unwrap();
+                let score_to = sorted_set.by_member.get(&to).unwrap();
+                let (lon1, lat1) = decode(score_from.clone() as u64);
+                let (lon2, lat2) = decode(score_to.clone() as u64);
+
+                let distance = distance(lon1, lat1, lon2, lat2);
+                CommandResult::Value(Some(distance.to_string()))
             }
         }
     }

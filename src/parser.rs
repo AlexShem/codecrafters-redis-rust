@@ -322,6 +322,19 @@ impl Parser {
                         }
                         Ok(RedisCommand::Geopos { key, positions })
                     }
+                    "GEODIST" => {
+                        if elements.len() != 4 {
+                            return Err(anyhow!(
+                                "GEODIST command requires exactly three arguments"
+                            ));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        let from = self.extract_string(&elements[2])?;
+                        let to = self.extract_string(&elements[3])?;
+
+                        Ok(RedisCommand::Geodist { key, from, to })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

@@ -6,6 +6,8 @@ const MAX_LONGITUDE: f64 = 180.0;
 const LATITUDE_RANGE: f64 = MAX_LATITUDE - MIN_LATITUDE;
 const LONGITUDE_RANGE: f64 = MAX_LONGITUDE - MIN_LONGITUDE;
 
+const EARTH_RADIUS_IN_METERS: f64 = 6372797.560856;
+
 fn spread_int32_to_int64(v: u32) -> u64 {
     let mut result = v as u64;
     result = (result | (result << 16)) & 0x0000FFFF0000FFFF;
@@ -93,4 +95,15 @@ pub fn is_valid_longitude(longitude: f64) -> bool {
 
 pub fn is_valid_latitude(latitude: f64) -> bool {
     latitude <= MAX_LATITUDE && latitude >= MIN_LATITUDE
+}
+
+pub fn distance(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
+    let lat1 = lat1.to_radians();
+    let lat2 = lat2.to_radians();
+    let d_lat = lat2 - lat1;
+    let d_lon = (lon2 - lon1).to_radians();
+
+    let a = (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat1.cos() * lat2.cos();
+    let c = 2.0 * a.sqrt().asin();
+    EARTH_RADIUS_IN_METERS * c
 }

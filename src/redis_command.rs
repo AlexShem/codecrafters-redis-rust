@@ -92,6 +92,11 @@ pub enum RedisCommand {
         key: String,
         positions: Vec<String>,
     },
+    Geodist {
+        key: String,
+        from: String,
+        to: String,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +145,7 @@ impl Display for RedisCommand {
             RedisCommand::Blpop { .. } => f.write_str("BLPOP"),
             RedisCommand::Geoadd { .. } => f.write_str("GEOADD"),
             RedisCommand::Geopos { .. } => f.write_str("GEOPOS"),
+            RedisCommand::Geodist { .. } => f.write_str("GEODIST"),
         }
     }
 }
