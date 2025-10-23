@@ -362,7 +362,7 @@ impl CommandProcessor {
 
                 for position in positions {
                     if let Some(coord) = sorted_set.by_member.get(&position) {
-                        let (lon, lat) = decode(coord.clone());
+                        let (lon, lat) = decode(coord.clone() as u64);
                         responses.push(CommandResult::Array(vec![
                             CommandResult::Value(Some(lon.to_string())),
                             CommandResult::Value(Some(lat.to_string())),
