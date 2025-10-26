@@ -96,7 +96,13 @@ pub enum RedisCommand {
         key: String,
         from: String,
         to: String,
-    }
+    },
+    Geosearch {
+        key: String,
+        longitude: f64,
+        latitude: f64,
+        radius: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +152,7 @@ impl Display for RedisCommand {
             RedisCommand::Geoadd { .. } => f.write_str("GEOADD"),
             RedisCommand::Geopos { .. } => f.write_str("GEOPOS"),
             RedisCommand::Geodist { .. } => f.write_str("GEODIST"),
+            RedisCommand::Geosearch { .. } => f.write_str("GEOSEARCH"),
         }
     }
 }

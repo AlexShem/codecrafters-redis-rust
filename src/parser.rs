@@ -335,6 +335,47 @@ impl Parser {
 
                         Ok(RedisCommand::Geodist { key, from, to })
                     }
+                    "GEOSEARCH" => {
+                        if elements.len() != 8 {
+                            return Err(anyhow!(
+                                "GEOSEARCH command requires exactly seven arguments"
+                            ));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        match self.extract_string(&elements[2]) {
+                            Ok(from_units) => {
+                                if from_units.to_uppercase() != "FROMLONLAT" {
+                                    return Err(anyhow!("FROMLONLAT keyword was expected"));
+                                }
+                            }
+                            Err(e) => {
+                                return Err(anyhow!("Error parsing 'from_units'. Got: {}", e))
+                            }
+                        }
+                        let longitude: f64 = self.extract_string(&elements[3])?.parse()?;
+                        let latitude: f64 = self.extract_string(&elements[4])?.parse()?;
+                        match self.extract_string(&elements[5]) {
+                            Ok(by_units) => {
+                                if by_units.to_uppercase() != "BYRADIUS" {
+                                    return Err(anyhow!("BYRADIUS keyword was expected"));
+                                }
+                            }
+                            Err(e) => return Err(anyhow!("Error parsing 'by_unit'. Got: {}", e)),
+                        }
+                        let radius: f64 = self.extract_string(&elements[6])?.parse()?;
+                        let units = self.extract_string(&elements[7])?;
+                        if units.to_lowercase() != "m" {
+                            return Err(anyhow!("Meter units 'm' were expected"));
+                        }
+
+                        Ok(RedisCommand::Geosearch {
+                            key,
+                            longitude,
+                            latitude,
+                            radius,
+                        })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

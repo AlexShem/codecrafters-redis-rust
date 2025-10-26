@@ -317,12 +317,7 @@ impl CommandProcessor {
                 }
 
                 self.blocking_list_manager
-                    .register_waiting_client(
-                        key,
-                        self.client_id,
-                        self.blocking_tx.clone(),
-                        timeout as f64,
-                    )
+                    .register_waiting_client(key, self.client_id, self.blocking_tx.clone(), timeout)
                     .await;
 
                 CommandResult::Blocked
@@ -393,6 +388,28 @@ impl CommandProcessor {
 
                 let distance = distance(lon1, lat1, lon2, lat2);
                 CommandResult::Value(Some(distance.to_string()))
+            }
+            RedisCommand::Geosearch {
+                key,
+                longitude,
+                latitude,
+                radius,
+            } => {
+                let sorted_sets = self.storage.sorted_sets.read().await;
+                if !sorted_sets.contains_key(&key) {
+                    return CommandResult::NullArray;
+                }
+                let mut result = Vec::new();
+                let sorted_set = sorted_sets.get(&key).unwrap();
+                for location in sorted_set.ordered.iter() {
+                    let location_coord = decode(location.score as u64);
+                    let distance =
+                        distance(longitude, latitude, location_coord.0, location_coord.1);
+                    if distance <= radius {
+                        result.push(CommandResult::Value(Some(location.member.clone())));
+                    }
+                }
+                CommandResult::Array(result)
             }
         }
     }

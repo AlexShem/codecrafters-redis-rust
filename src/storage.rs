@@ -30,13 +30,13 @@ struct StoredValue {
 
 pub struct SortedSet {
     pub by_member: HashMap<String, f64>,
-    ordered: BTreeSet<ScoredMember>,
+    pub ordered: BTreeSet<ScoredMember>,
 }
 
 #[derive(Clone)]
-struct ScoredMember {
-    score: f64,
-    member: String,
+pub struct ScoredMember {
+    pub score: f64,
+    pub member: String,
 }
 
 impl Storage {
