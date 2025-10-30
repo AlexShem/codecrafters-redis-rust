@@ -14,6 +14,7 @@ impl RedisResponse {
             }
             CommandResult::Ok => b"+OK\r\n".to_vec(),
             CommandResult::Queued => b"+QUEUED\r\n".to_vec(),
+            CommandResult::SimpleString(value) => format!("+{value}\r\n").into_bytes(),
             CommandResult::Value(value) => {
                 if let Some(val) = value {
                     format!("${}\r\n{}\r\n", val.len(), val).into_bytes()

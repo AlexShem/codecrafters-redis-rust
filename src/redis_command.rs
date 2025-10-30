@@ -103,6 +103,9 @@ pub enum RedisCommand {
         latitude: f64,
         radius: f64,
     },
+    Type {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +114,7 @@ pub enum CommandResult {
     Echo(String),
     Ok,
     Queued,
+    SimpleString(String),
     Value(Option<String>),
     Integer(i64),
     Array(Vec<CommandResult>),
@@ -153,6 +157,7 @@ impl Display for RedisCommand {
             RedisCommand::Geopos { .. } => f.write_str("GEOPOS"),
             RedisCommand::Geodist { .. } => f.write_str("GEODIST"),
             RedisCommand::Geosearch { .. } => f.write_str("GEOSEARCH"),
+            RedisCommand::Type { .. } => f.write_str("TYPE"),
         }
     }
 }

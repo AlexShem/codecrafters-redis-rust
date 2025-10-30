@@ -411,6 +411,13 @@ impl CommandProcessor {
                 }
                 CommandResult::Array(result)
             }
+            RedisCommand::Type { key } => {
+                if let Some(_value) = self.storage.get(&key).await {
+                    CommandResult::SimpleString("string".to_string())
+                } else {
+                    CommandResult::SimpleString("none".to_string())
+                }
+            }
         }
     }
 }

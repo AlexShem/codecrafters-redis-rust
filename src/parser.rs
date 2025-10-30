@@ -376,6 +376,14 @@ impl Parser {
                             radius,
                         })
                     }
+                    "TYPE" => {
+                        if elements.len() != 2 {
+                            return Err(anyhow!("TYPE command requires exactly one argument"));
+                        }
+
+                        let key = self.extract_string(&elements[1])?;
+                        Ok(RedisCommand::Type { key })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }
