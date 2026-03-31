@@ -81,7 +81,6 @@ pub enum RedisCommand {
         key: String,
         timeout: f64,
     },
-    #[allow(unused)]
     Geoadd {
         key: String,
         longitude: f64,
@@ -105,6 +104,11 @@ pub enum RedisCommand {
     },
     Type {
         key: String,
+    },
+    Xadd {
+        stream_key: String,
+        id: String,
+        fields: Vec<(String, String)>,
     },
 }
 
@@ -158,6 +162,7 @@ impl Display for RedisCommand {
             RedisCommand::Geodist { .. } => f.write_str("GEODIST"),
             RedisCommand::Geosearch { .. } => f.write_str("GEOSEARCH"),
             RedisCommand::Type { .. } => f.write_str("TYPE"),
+            RedisCommand::Xadd { .. } => f.write_str("XADD"),
         }
     }
 }

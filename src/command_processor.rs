@@ -412,11 +412,21 @@ impl CommandProcessor {
                 CommandResult::Array(result)
             }
             RedisCommand::Type { key } => {
-                if let Some(_value) = self.storage.get(&key).await {
+                if self.storage.is_stream(&key).await {
+                    CommandResult::SimpleString("stream".to_string())
+                } else if self.storage.get(&key).await.is_some() {
                     CommandResult::SimpleString("string".to_string())
                 } else {
                     CommandResult::SimpleString("none".to_string())
                 }
+            }
+            RedisCommand::Xadd {
+                stream_key,
+                id,
+                fields,
+            } => {
+                let entry_id = self.storage.xadd(stream_key, id, fields).await;
+                CommandResult::Value(Some(entry_id))
             }
         }
     }

@@ -384,6 +384,24 @@ impl Parser {
                         let key = self.extract_string(&elements[1])?;
                         Ok(RedisCommand::Type { key })
                     }
+                    "XADD" => {
+                        if elements.len() < 5 || (elements.len() - 3) % 2 != 0 {
+                            return Err(anyhow!("XADD command requires at least four arguments (stream_key id field value ...)"));
+                        }
+
+                        let stream_key = self.extract_string(&elements[1])?;
+                        let id = self.extract_string(&elements[2])?;
+                        let mut fields = Vec::new();
+                        let mut i = 3;
+                        while i + 1 < elements.len() {
+                            let field = self.extract_string(&elements[i])?;
+                            let value = self.extract_string(&elements[i + 1])?;
+                            fields.push((field, value));
+                            i += 2;
+                        }
+
+                        Ok(RedisCommand::Xadd { stream_key, id, fields })
+                    }
                     _ => Err(anyhow!("Unsupported command: {}", command_name)),
                 }
             }

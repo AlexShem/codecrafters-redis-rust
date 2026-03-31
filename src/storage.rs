@@ -17,10 +17,16 @@ pub struct Storage {
     /// Sorted sets, stored as set name `String` and the `SortedSet`.
     pub sorted_sets: Arc<RwLock<HashMap<String, SortedSet>>>,
     lists: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+    streams: Arc<RwLock<HashMap<String, Vec<StreamEntry>>>>,
     #[allow(unused)]
     file_path: Option<PathBuf>,
     dir: Option<String>,
     dbfilename: Option<String>,
+}
+
+struct StreamEntry {
+    id: String,
+    fields: Vec<(String, String)>,
 }
 
 struct StoredValue {
@@ -51,6 +57,7 @@ impl Storage {
                     data: Arc::new(RwLock::new(data)),
                     sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                     lists: Arc::new(RwLock::new(HashMap::new())),
+                    streams: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
@@ -59,6 +66,7 @@ impl Storage {
                     data: Arc::new(RwLock::new(HashMap::new())),
                     sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                     lists: Arc::new(RwLock::new(HashMap::new())),
+                    streams: Arc::new(RwLock::new(HashMap::new())),
                     file_path: Some(path),
                     dir,
                     dbfilename,
@@ -69,6 +77,7 @@ impl Storage {
                 data: Arc::new(RwLock::new(HashMap::new())),
                 sorted_sets: Arc::new(RwLock::new(HashMap::new())),
                 lists: Arc::new(RwLock::new(HashMap::new())),
+                streams: Arc::new(RwLock::new(HashMap::new())),
                 file_path,
                 dir,
                 dbfilename,
@@ -243,6 +252,26 @@ impl Storage {
     pub async fn llen(&self, key: String) -> Option<usize> {
         let list = self.lists.read().await;
         list.get(&key).and_then(|elements| Some(elements.len()))
+    }
+
+    pub async fn xadd(
+        &self,
+        stream_key: String,
+        id: String,
+        fields: Vec<(String, String)>,
+    ) -> String {
+        let mut streams = self.streams.write().await;
+        let entries = streams.entry(stream_key).or_insert_with(Vec::new);
+        entries.push(StreamEntry {
+            id: id.clone(),
+            fields,
+        });
+        id
+    }
+
+    pub async fn is_stream(&self, key: &str) -> bool {
+        let streams = self.streams.read().await;
+        streams.contains_key(key)
     }
 
     pub async fn lpop(&self, key: String, count: Option<usize>) -> Option<Vec<String>> {
