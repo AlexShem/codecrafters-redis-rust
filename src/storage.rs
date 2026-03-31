@@ -504,7 +504,11 @@ fn next_seq_for_ms(entries: &[StreamEntry], ms: u64) -> u64 {
         .rev()
         .find_map(|e| {
             let (e_ms, e_seq) = parse_stream_id(&e.id)?;
-            if e_ms == ms { Some(e_seq + 1) } else { None }
+            if e_ms == ms {
+                Some(e_seq + 1)
+            } else {
+                None
+            }
         })
         .unwrap_or(if ms == 0 { 1 } else { 0 })
 }
