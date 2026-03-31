@@ -250,21 +250,17 @@ impl Storage {
         let mut streams = self.streams.write().await;
         let entries = streams.entry(stream_key).or_insert_with(Vec::new);
 
-        // Resolve the final (ms, seq) — handle `ms-*` auto-sequence format
         let (ms, seq) = if let Some(ms_str) = id.strip_suffix("-*") {
             let ms = ms_str
                 .parse::<u64>()
                 .map_err(|_| "Invalid stream ID format".to_string())?;
-            // Find the last entry with the same ms to determine seq
-            let seq = entries
-                .iter()
-                .rev()
-                .find_map(|e| {
-                    let (e_ms, e_seq) = parse_stream_id(&e.id)?;
-                    if e_ms == ms { Some(e_seq + 1) } else { None }
-                })
-                .unwrap_or(if ms == 0 { 1 } else { 0 });
-            (ms, seq)
+            (ms, next_seq_for_ms(entries, ms))
+        } else if id == "*" {
+            let ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_millis() as u64;
+            (ms, next_seq_for_ms(entries, ms))
         } else {
             parse_stream_id(&id).ok_or_else(|| "Invalid stream ID format".to_string())?
         };
@@ -274,15 +270,21 @@ impl Storage {
         }
 
         if let Some(last) = entries.last() {
-            let (last_ms, last_seq) = parse_stream_id(&last.id)
-                .ok_or_else(|| "Invalid stream ID format".to_string())?;
+            let (last_ms, last_seq) =
+                parse_stream_id(&last.id).ok_or_else(|| "Invalid stream ID format".to_string())?;
             if ms < last_ms || (ms == last_ms && seq <= last_seq) {
-                return Err("The ID specified in XADD is equal or smaller than the target stream top item".to_string());
+                return Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .to_string(),
+                );
             }
         }
 
         let final_id = format!("{}-{}", ms, seq);
-        entries.push(StreamEntry { id: final_id.clone(), fields });
+        entries.push(StreamEntry {
+            id: final_id.clone(),
+            fields,
+        });
         Ok(final_id)
     }
 
@@ -492,6 +494,19 @@ fn resolve_range(size: i32, start: i32, end: i32) -> Option<(i32, i32)> {
         return None;
     }
     Some((start.max(0), end.min(size)))
+}
+
+/// Returns the next sequence number to use for a given `ms` timestamp.
+/// Scans existing entries in reverse to find the last one with the same ms.
+fn next_seq_for_ms(entries: &[StreamEntry], ms: u64) -> u64 {
+    entries
+        .iter()
+        .rev()
+        .find_map(|e| {
+            let (e_ms, e_seq) = parse_stream_id(&e.id)?;
+            if e_ms == ms { Some(e_seq + 1) } else { None }
+        })
+        .unwrap_or(if ms == 0 { 1 } else { 0 })
 }
 
 fn parse_stream_id(id: &str) -> Option<(u64, u64)> {
