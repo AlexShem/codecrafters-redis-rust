@@ -26,6 +26,7 @@ pub struct Storage {
 
 struct StreamEntry {
     id: String,
+    #[allow(unused)]
     fields: Vec<(String, String)>,
 }
 
@@ -259,14 +260,26 @@ impl Storage {
         stream_key: String,
         id: String,
         fields: Vec<(String, String)>,
-    ) -> String {
+    ) -> Result<String, String> {
+        let (ms, seq) = parse_stream_id(&id)
+            .ok_or_else(|| "Invalid stream ID format".to_string())?;
+
+        if ms == 0 && seq == 0 {
+            return Err("The ID specified in XADD must be greater than 0-0".to_string());
+        }
+
         let mut streams = self.streams.write().await;
         let entries = streams.entry(stream_key).or_insert_with(Vec::new);
-        entries.push(StreamEntry {
-            id: id.clone(),
-            fields,
-        });
-        id
+
+        if let Some(last) = entries.last() {
+            let (last_ms, last_seq) = parse_stream_id(&last.id).unwrap();
+            if ms < last_ms || (ms == last_ms && seq <= last_seq) {
+                return Err("The ID specified in XADD is equal or smaller than the target stream top item".to_string());
+            }
+        }
+
+        entries.push(StreamEntry { id: id.clone(), fields });
+        Ok(id)
     }
 
     pub async fn is_stream(&self, key: &str) -> bool {
@@ -474,6 +487,13 @@ async fn read_database_file(file_path: PathBuf) -> anyhow::Result<HashMap<String
     let _end_of_file = read_eof(&mut content)?;
 
     Ok(database)
+}
+
+fn parse_stream_id(id: &str) -> Option<(u64, u64)> {
+    let (ms_str, seq_str) = id.split_once('-')?;
+    let ms = ms_str.parse::<u64>().ok()?;
+    let seq = seq_str.parse::<u64>().ok()?;
+    Some((ms, seq))
 }
 
 fn read_metadata(content: &mut Bytes) -> anyhow::Result<Vec<String>> {

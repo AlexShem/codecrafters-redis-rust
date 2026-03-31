@@ -424,10 +424,10 @@ impl CommandProcessor {
                 stream_key,
                 id,
                 fields,
-            } => {
-                let entry_id = self.storage.xadd(stream_key, id, fields).await;
-                CommandResult::Value(Some(entry_id))
-            }
+            } => match self.storage.xadd(stream_key, id, fields).await {
+                Ok(entry_id) => CommandResult::Value(Some(entry_id)),
+                Err(e) => CommandResult::RedisError(e),
+            },
         }
     }
 }
