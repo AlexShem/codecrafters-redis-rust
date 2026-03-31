@@ -218,21 +218,7 @@ impl Storage {
     pub async fn lrange(&self, key: String, start: i32, end: i32) -> Option<Vec<String>> {
         let lists = self.lists.read().await;
         if let Some(list) = lists.get(&key) {
-            let members_size = list.len() as i32;
-
-            let (start, end) = match (start.is_negative(), end.is_negative()) {
-                (false, false) => (start, end),
-                (false, true) => (start, members_size + end),
-                (true, false) => (members_size + start, end),
-                (true, true) => (members_size + start, members_size + end),
-            };
-
-            if start >= members_size || start > end {
-                return None;
-            }
-
-            let first = start.max(0);
-            let last = end.min(members_size);
+            let (first, last) = resolve_range(list.len() as i32, start, end)?;
             let members: Vec<String> = list
                 .iter()
                 .enumerate()
@@ -261,25 +247,43 @@ impl Storage {
         id: String,
         fields: Vec<(String, String)>,
     ) -> Result<String, String> {
-        let (ms, seq) = parse_stream_id(&id)
-            .ok_or_else(|| "Invalid stream ID format".to_string())?;
+        let mut streams = self.streams.write().await;
+        let entries = streams.entry(stream_key).or_insert_with(Vec::new);
+
+        // Resolve the final (ms, seq) — handle `ms-*` auto-sequence format
+        let (ms, seq) = if let Some(ms_str) = id.strip_suffix("-*") {
+            let ms = ms_str
+                .parse::<u64>()
+                .map_err(|_| "Invalid stream ID format".to_string())?;
+            // Find the last entry with the same ms to determine seq
+            let seq = entries
+                .iter()
+                .rev()
+                .find_map(|e| {
+                    let (e_ms, e_seq) = parse_stream_id(&e.id)?;
+                    if e_ms == ms { Some(e_seq + 1) } else { None }
+                })
+                .unwrap_or(if ms == 0 { 1 } else { 0 });
+            (ms, seq)
+        } else {
+            parse_stream_id(&id).ok_or_else(|| "Invalid stream ID format".to_string())?
+        };
 
         if ms == 0 && seq == 0 {
             return Err("The ID specified in XADD must be greater than 0-0".to_string());
         }
 
-        let mut streams = self.streams.write().await;
-        let entries = streams.entry(stream_key).or_insert_with(Vec::new);
-
         if let Some(last) = entries.last() {
-            let (last_ms, last_seq) = parse_stream_id(&last.id).unwrap();
+            let (last_ms, last_seq) = parse_stream_id(&last.id)
+                .ok_or_else(|| "Invalid stream ID format".to_string())?;
             if ms < last_ms || (ms == last_ms && seq <= last_seq) {
                 return Err("The ID specified in XADD is equal or smaller than the target stream top item".to_string());
             }
         }
 
-        entries.push(StreamEntry { id: id.clone(), fields });
-        Ok(id)
+        let final_id = format!("{}-{}", ms, seq);
+        entries.push(StreamEntry { id: final_id.clone(), fields });
+        Ok(final_id)
     }
 
     pub async fn is_stream(&self, key: &str) -> bool {
@@ -380,21 +384,7 @@ impl SortedSet {
     }
 
     fn zrange(&self, start: i32, end: i32) -> Option<Vec<String>> {
-        let members_size = self.by_member.len() as i32;
-
-        let (start, end) = match (start.is_negative(), end.is_negative()) {
-            (false, false) => (start, end),
-            (false, true) => (start, members_size + end),
-            (true, false) => (members_size + start, end),
-            (true, true) => (members_size + start, members_size + end),
-        };
-
-        if start >= members_size || start > end {
-            return None;
-        }
-
-        let first = start.max(0);
-        let last = end.min(members_size);
+        let (first, last) = resolve_range(self.by_member.len() as i32, start, end)?;
         let members: Vec<String> = self
             .ordered
             .iter()
@@ -487,6 +477,21 @@ async fn read_database_file(file_path: PathBuf) -> anyhow::Result<HashMap<String
     let _end_of_file = read_eof(&mut content)?;
 
     Ok(database)
+}
+
+/// Resolves a (start, end) range with negative-index support against a collection of `size`.
+/// Returns `Some((first, last))` clamped to valid bounds, or `None` if the range is empty.
+fn resolve_range(size: i32, start: i32, end: i32) -> Option<(i32, i32)> {
+    let (start, end) = match (start.is_negative(), end.is_negative()) {
+        (false, false) => (start, end),
+        (false, true) => (start, size + end),
+        (true, false) => (size + start, end),
+        (true, true) => (size + start, size + end),
+    };
+    if start >= size || start > end {
+        return None;
+    }
+    Some((start.max(0), end.min(size)))
 }
 
 fn parse_stream_id(id: &str) -> Option<(u64, u64)> {
